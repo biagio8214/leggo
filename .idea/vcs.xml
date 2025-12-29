@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/libmupdf/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/libmupdf/mupdf-android-fitz/mupdf/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf/mupdf-android-fitz/mupdf/mupdf-android-fitz" vcs="Git" />
+  </component>
+</project>
