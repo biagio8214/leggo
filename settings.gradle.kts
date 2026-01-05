@@ -16,10 +16,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://maven.ghostscript.com/") }
     }
 }
 
 rootProject.name = "leggo"
 include(":app")
-include(":mupdf-android-fitz")

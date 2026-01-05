@@ -17,9 +17,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Leggo"
-        tools:replace="android:theme,android:allowBackup,android:label,android:icon,android:roundIcon,android:supportsRtl,android:appComponentFactory,android:dataExtractionRules,android:fullBackupContent"
-        tools:ignore="MissingClass">
+        android:theme="@style/Theme.Leggo">
 
         <activity
             android:name=".MainActivity"
@@ -33,24 +31,27 @@
         <activity android:name=".SettingsActivity" />
         <activity android:name=".LibraryActivity" />
         <activity android:name=".SearchBooksActivity" />
-        
-        <!-- DocumentActivity è spesso definita nell'AAR di MuPDF. 
-             La dichiariamo qui per poter fare override degli attributi se necessario -->
-        <activity android:name="com.artifex.mupdf.viewer.DocumentActivity"
-            android:exported="true"
-            tools:node="merge"
-            tools:replace="android:exported,android:theme">
-        </activity>
-
         <activity android:name=".PdfReaderActivity" />
         <activity android:name=".TrashActivity" />
         <activity android:name=".CreditsActivity" />
+        <activity android:name=".ThanksActivity" />
+        <activity android:name=".BookDetailActivity" />
         
         <service 
             android:name=".ReadingService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+            
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
 
     </application>
 
