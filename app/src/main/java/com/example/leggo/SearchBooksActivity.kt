@@ -1,7 +1,7 @@
 package com.example.leggo
 
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -11,8 +11,6 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
@@ -24,37 +22,65 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
+import java.util.concurrent.atomic.AtomicInteger
 
-class SearchBooksActivity : AppCompatActivity() {
+class SearchBooksActivity : BaseActivity() {
 
     private lateinit var etQuery: EditText
     private lateinit var btnSearch: Button
     private lateinit var recycler: RecyclerView
     private lateinit var progressBar: ProgressBar
+    private lateinit var tvNoResults: TextView
 
-    // API Open Library o Gutenberg (Gutendex)
-    // Usiamo Gutendex per Project Gutenberg (libri gratuiti)
+    // Generic model for search results
+    data class BookItem(
+        val title: String,
+        val authors: String,
+        val coverUrl: String?,
+        val downloadUrl: String?,
+        val language: String?,
+        val description: String? = null
+    )
+
+    // Gutendex API
     interface GutendexApi {
         @GET("books")
-        fun searchBooks(@Query("search") query: String): Call<GutendexResponse>
+        fun searchBooks(@Query("search") query: String, @Query("languages") languages: String?): Call<GutendexResponse>
     }
     
-    data class GutendexResponse(
-        val count: Int,
-        val results: List<BookResult>
-    )
-
-    data class BookResult(
-        val id: Int,
-        val title: String,
-        val authors: List<Author>,
-        val formats: Map<String, String>,
+    data class GutendexResponse(val count: Int, val results: List<GutendexBook>)
+    data class GutendexBook(
+        val id: Int, val title: String, val authors: List<GutenAuthor>,
+        val languages: List<String>, val formats: Map<String, String>,
         @SerializedName("download_count") val downloadCount: Int
     )
+    data class GutenAuthor(val name: String)
 
-    data class Author(
-        val name: String
+    // Google Books API
+    interface GoogleBooksApi {
+        @GET("books/v1/volumes")
+        fun searchBooks(
+            @Query("q") query: String,
+            @Query("filter") filter: String = "free-ebooks",
+            @Query("printType") printType: String = "books",
+            @Query("langRestrict") langRestrict: String? = null
+        ): Call<GoogleBooksResponse>
+    }
+
+    data class GoogleBooksResponse(val items: List<GoogleBook>?)
+    data class GoogleBook(val volumeInfo: GoogleVolumeInfo, val accessInfo: GoogleAccessInfo)
+    data class GoogleVolumeInfo(
+        val title: String, val authors: List<String>?, val imageLinks: GoogleImageLinks?,
+        val language: String?
     )
+    data class GoogleImageLinks(val thumbnail: String?, val smallThumbnail: String?)
+    data class GoogleAccessInfo(val epub: GoogleAccessLink?, val pdf: GoogleAccessLink?)
+    data class GoogleAccessLink(val isAvailable: Boolean, val downloadLink: String?)
+
+
+    private var bookAdapter: BookAdapter? = null
+    private val allBooks = mutableListOf<BookItem>()
+    private val pendingRequests = AtomicInteger(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,10 +90,12 @@ class SearchBooksActivity : AppCompatActivity() {
         btnSearch = findViewById(R.id.btnPerformSearch)
         recycler = findViewById(R.id.recyclerSearchResults)
         progressBar = findViewById(R.id.progressBar)
+        tvNoResults = findViewById(R.id.tvNoResults)
 
         recycler.layoutManager = LinearLayoutManager(this)
+        bookAdapter = BookAdapter(allBooks)
+        recycler.adapter = bookAdapter
 
-        // Prendi query dall'intent se presente
         val initialQuery = intent.getStringExtra("QUERY")
         if (!initialQuery.isNullOrEmpty()) {
             etQuery.setText(initialQuery)
@@ -81,49 +109,132 @@ class SearchBooksActivity : AppCompatActivity() {
             }
         }
     }
-
+    
     private fun performSearch(query: String) {
         progressBar.visibility = View.VISIBLE
         recycler.visibility = View.GONE
+        tvNoResults.visibility = View.GONE
         
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://gutendex.com/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            
+        allBooks.clear()
+        bookAdapter?.notifyDataSetChanged()
+        
+        val prefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
+        val appLang = prefs.getString("app_lang", "it")
+        val searchLang = if (appLang == "it") "it" else "en"
+
+        pendingRequests.set(2) 
+        searchGutendex(query, searchLang)
+        searchGoogleBooks(query, searchLang)
+    }
+    
+    private fun searchGutendex(query: String, lang: String) {
+        val retrofit = Retrofit.Builder().baseUrl("https://gutendex.com/").addConverterFactory(GsonConverterFactory.create()).build()
         val api = retrofit.create(GutendexApi::class.java)
         
-        api.searchBooks(query).enqueue(object : Callback<GutendexResponse> {
+        api.searchBooks(query, lang).enqueue(object : Callback<GutendexResponse> {
             override fun onResponse(call: Call<GutendexResponse>, response: Response<GutendexResponse>) {
-                progressBar.visibility = View.GONE
-                recycler.visibility = View.VISIBLE
-                
                 if (response.isSuccessful && response.body() != null) {
-                    val books = response.body()!!.results
-                    recycler.adapter = BookAdapter(books)
-                    if (books.isEmpty()) {
-                        Toast.makeText(this@SearchBooksActivity, "Nessun risultato trovato", Toast.LENGTH_SHORT).show()
+                    val rawBooks = response.body()!!.results
+                    val bookItems = rawBooks.map { book ->
+                        var pdfUrl: String? = null
+                        var epubUrl: String? = null
+                        var htmlUrl: String? = null
+                        for ((key, value) in book.formats) {
+                            if (key.contains("application/pdf")) pdfUrl = value
+                            if (key.contains("application/epub+zip")) epubUrl = value
+                            if (key.contains("text/html")) htmlUrl = value
+                        }
+                        val downloadUrl = pdfUrl ?: epubUrl ?: htmlUrl
+                        
+                        BookItem(
+                            title = book.title,
+                            authors = book.authors.joinToString(", ") { it.name },
+                            coverUrl = book.formats.entries.find { it.key.contains("image/jpeg") }?.value,
+                            downloadUrl = downloadUrl,
+                            language = book.languages.firstOrNull(),
+                            description = "Download: ${book.downloadCount}"
+                        )
                     }
-                } else {
-                    Toast.makeText(this@SearchBooksActivity, "Errore nella ricerca", Toast.LENGTH_SHORT).show()
+                    addResults(bookItems)
                 }
+                checkProgress()
             }
 
             override fun onFailure(call: Call<GutendexResponse>, t: Throwable) {
-                progressBar.visibility = View.GONE
-                Toast.makeText(this@SearchBooksActivity, "Errore di rete: ${t.message}", Toast.LENGTH_SHORT).show()
+                checkProgress()
+            }
+        })
+    }
+
+    private fun searchGoogleBooks(query: String, lang: String) {
+        val retrofit = Retrofit.Builder().baseUrl("https://www.googleapis.com/").addConverterFactory(GsonConverterFactory.create()).build()
+        val api = retrofit.create(GoogleBooksApi::class.java)
+        
+        api.searchBooks(query, langRestrict = lang).enqueue(object : Callback<GoogleBooksResponse> {
+            override fun onResponse(call: Call<GoogleBooksResponse>, response: Response<GoogleBooksResponse>) {
+                if (response.isSuccessful) {
+                    val rawBooks = response.body()?.items ?: emptyList()
+                    val bookItems = rawBooks.map { book ->
+                        val info = book.volumeInfo
+                        val access = book.accessInfo
+                        val downloadUrl = if (access.epub?.isAvailable == true && !access.epub.downloadLink.isNullOrBlank()) {
+                            access.epub.downloadLink
+                        } else if (access.pdf?.isAvailable == true && !access.pdf.downloadLink.isNullOrBlank()) {
+                            access.pdf.downloadLink
+                        } else {
+                            null
+                        }
+                        
+                        val coverUrl = info.imageLinks?.thumbnail?.replace("http://", "https://")
+
+                        BookItem(
+                            title = info.title,
+                            authors = info.authors?.joinToString(", ") ?: getString(R.string.author_unknown),
+                            coverUrl = coverUrl,
+                            downloadUrl = downloadUrl,
+                            language = info.language,
+                            description = null
+                        )
+                    }
+                    addResults(bookItems)
+                }
+                checkProgress()
+            }
+             override fun onFailure(call: Call<GoogleBooksResponse>, t: Throwable) {
+                checkProgress()
             }
         })
     }
     
-    inner class BookAdapter(private val books: List<BookResult>) : RecyclerView.Adapter<BookAdapter.BookViewHolder>() {
+    @Synchronized
+    private fun addResults(newBooks: List<BookItem>) {
+        if (newBooks.isNotEmpty()) {
+            val startPos = allBooks.size
+            allBooks.addAll(newBooks)
+            bookAdapter?.notifyItemRangeInserted(startPos, newBooks.size)
+        }
+    }
+    
+    private fun checkProgress() {
+        if (pendingRequests.decrementAndGet() == 0) {
+            progressBar.visibility = View.GONE
+            if (allBooks.isEmpty()) {
+                tvNoResults.visibility = View.VISIBLE
+                recycler.visibility = View.GONE
+            } else {
+                tvNoResults.visibility = View.GONE
+                recycler.visibility = View.VISIBLE
+            }
+        }
+    }
+    
+    inner class BookAdapter(private val books: List<BookItem>) : RecyclerView.Adapter<BookAdapter.BookViewHolder>() {
         
         inner class BookViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             val imgCover: ImageView = itemView.findViewById(R.id.imgBookCover)
             val tvTitle: TextView = itemView.findViewById(R.id.tvBookTitle)
             val tvAuthor: TextView = itemView.findViewById(R.id.tvBookAuthor)
             val tvDesc: TextView = itemView.findViewById(R.id.tvBookDescription)
-            val btnAction: Button = itemView.findViewById(R.id.btnBookAction)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): BookViewHolder {
@@ -134,40 +245,30 @@ class SearchBooksActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: BookViewHolder, position: Int) {
             val book = books[position]
             holder.tvTitle.text = book.title
+            holder.tvAuthor.text = if (book.authors.isNotBlank()) book.authors else getString(R.string.author_unknown)
             
-            val authors = book.authors.joinToString(", ") { it.name }
-            holder.tvAuthor.text = if (authors.isNotBlank()) authors else "Autore sconosciuto"
-            
-            // Gutendex non fornisce una "descrizione" testuale lunga facilmente accessibile nella lista search, 
-            // ma possiamo mostrare download count o subjects.
-            holder.tvDesc.text = "Download: ${book.downloadCount}"
-            
-            // Trova copertina
-            val coverUrl = book.formats["image/jpeg"]
-            if (coverUrl != null) {
-                holder.imgCover.load(coverUrl) {
-                    crossfade(true)
-                    placeholder(android.R.drawable.ic_menu_gallery)
-                }
+            if (book.description != null) {
+                holder.tvDesc.text = book.description
+                holder.tvDesc.visibility = View.VISIBLE
             } else {
-                holder.imgCover.setImageResource(android.R.drawable.ic_menu_gallery)
+                holder.tvDesc.visibility = View.GONE
             }
             
-            holder.btnAction.setOnClickListener {
-                // Apri pagina libro per scaricare
-                // Cerchiamo formato epub o pdf
-                val epubUrl = book.formats["application/epub+zip"]
-                val pdfUrl = book.formats["application/pdf"]
-                val htmlUrl = book.formats["text/html"]
-                
-                val urlToOpen = epubUrl ?: pdfUrl ?: htmlUrl
-                
-                if (urlToOpen != null) {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
-                    startActivity(intent)
-                } else {
-                    Toast.makeText(holder.itemView.context, "Formato leggibile non disponibile direttamente", Toast.LENGTH_SHORT).show()
+            if (book.coverUrl != null) {
+                holder.imgCover.load(book.coverUrl) { crossfade(true).placeholder(R.drawable.leggo).error(R.drawable.leggo) }
+            } else {
+                holder.imgCover.setImageResource(R.drawable.leggo)
+            }
+            
+            holder.itemView.setOnClickListener {
+                val intent = Intent(holder.itemView.context, BookDetailActivity::class.java).apply {
+                    putExtra("title", book.title)
+                    putExtra("author", book.authors)
+                    putExtra("cover_url", book.coverUrl)
+                    putExtra("download_url", book.downloadUrl)
+                    putExtra("language", book.language?.uppercase())
                 }
+                holder.itemView.context.startActivity(intent)
             }
         }
 

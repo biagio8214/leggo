@@ -1,3 +1,66 @@
 <resources>
-    <string name="app_name">leggo</string>
+    <string name="app_name">Leggo</string>
+
+    <!-- Main Activity -->
+    <string name="search_books_hint">Cerca libri gratuiti online...</string>
+    <string name="recently_read">Letti di recente</string>
+    <string name="load_book">Carica Libro</string>
+    <string name="library">Biblioteca</string>
+    <string name="settings">Impostazioni</string>
+    <string name="more">Altro</string>
+    <string name="search">Cerca</string>
+    <string name="no_results">Nessun risultato trovato</string>
+    <string name="search_error">Errore nella ricerca</string>
+    <string name="network_error">Errore di rete: %s</string>
+    <string name="move_to_trash_title">Sposta nel Cestino</string>
+    <string name="move_to_trash_message">Vuoi spostare \'%s\' nel cestino?</string>
+    <string name="move">Sposta</string>
+    <string name="cancel">Annulla</string>
+    <string name="book_moved_to_trash">Libro spostato nel cestino</string>
+
+    <!-- Reader Activity -->
+    <string name="no_file_to_read">Nessun file da leggere</string>
+    <string name="pdf_error">Errore apertura PDF</string>
+    <string name="txt_error">Errore apertura TXT</string>
+    <string name="epub_error">Errore apertura EPUB</string>
+    <string name="bookmark_saved">Posizione salvata a pagina %d</string>
+    <string name="bookmark_loaded">Caricata posizione da pagina %d</string>
+    <string name="no_bookmark_found">Nessun segnalibro trovato</string>
+    <string name="save_position">Salva Posizione</string>
+    <string name="load_position">Carica Posizione</string>
+    <string name="reading_page_pdf">Pagina PDF %d. Lettura vocale non ancora supportata per i PDF.</string>
+    <string name="page_count">Pagina %1$d / %2$d</string>
+    <string name="page_count_landscape">Pagina %1$d %2$s / %3$d</string>
+    
+    <!-- Settings Activity -->
+    <string name="reading_settings">Impostazioni di Lettura</string>
+    <string name="font_size">Dimensione Carattere</string>
+    <string name="tts_speed">Velocità Lettura Vocale</string>
+    <string name="tts_lang">Lingua Lettura Vocale</string>
+    <string name="reader_theme">Tema Pagina di Lettura</string>
+    <string name="app_language">Lingua Applicazione</string>
+    <string name="text_size_value">%d sp</string>
+    <string name="tts_speed_value">x%s</string>
+    
+    <!-- Menu -->
+    <string name="trash">Cestino</string>
+    <string name="copyright">Copyright</string>
+    <string name="thanks">Ringraziamenti</string>
+
+    <!-- Library/Trash -->
+    <string name="library_empty">La biblioteca è vuota.</string>
+    <string name="trash_empty">Il cestino è vuoto.</string>
+    <string name="author_unknown">Autore sconosciuto</string>
+    
+    <!-- Book Detail -->
+    <string name="download_page">Scarica / Apri Pagina</string>
+    <string name="language_label">Lingua: %s</string>
+    <string name="language_not_specified">Non specificata</string>
+    <string name="link_error">Impossibile aprire il link</string>
+    <string name="no_link_available">Nessun link disponibile per questo libro</string>
+    
+    <!-- Search -->
+    <string name="source_gutendex">Project Gutenberg (Gutendex)</string>
+    <string name="source_google">Google Books (Gratis)</string>
+    
 </resources>

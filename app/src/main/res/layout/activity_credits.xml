@@ -8,7 +8,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="center_horizontal">
+        android:gravity="start">
 
         <TextView
             android:layout_width="wrap_content"
@@ -17,32 +17,25 @@
             android:textSize="32sp"
             android:textStyle="bold"
             android:textColor="#FFD700"
+            android:layout_gravity="center_horizontal"
             android:layout_marginBottom="24dp"/>
 
+        <!-- Testo Legale -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Copyright © 2024\nTutti i diritti riservati."
-            android:gravity="center"
-            android:textSize="16sp"
-            android:layout_marginBottom="24dp"/>
+            android:text="1. COPYRIGHT E PROPRIETÀ INTELLETTUALE\n\nCopyright © 2024 Leggo\nTutti i diritti riservati.\n\nL’app Leggo è un lettore di file PDF.\nL’applicazione, il software, il codice sorgente, l’interfaccia e il design sono protetti dalle leggi sul diritto d’autore e sulla proprietà intellettuale.\n\nL’app non fornisce, non distribuisce e non ospita contenuti protetti da copyright di terzi.\n\nQualsiasi utilizzo dell’app in violazione delle leggi sul diritto d’autore è vietato.\n\n2. CONTENUTI DELL’UTENTE (User Generated Content – Policy Play Store)\n\nI file PDF visualizzati tramite l’app sono contenuti forniti esclusivamente dall’utente.\n\nLo sviluppatore:\n- non crea\n- non modifica\n- non controlla\n- non archivia\ni contenuti visualizzati tramite l’app.\n\nL’utente è l’unico responsabile dei file aperti e garantisce di possedere i diritti necessari per il loro utilizzo.\n\nIn conformità alle Google Play Policies, lo sviluppatore non è responsabile per eventuali violazioni di copyright derivanti dai contenuti forniti dall’utente.\n\n3. LICENZA D’USO DELL’APPLICAZIONE\n\nL’app è concessa in licenza personale, limitata, non esclusiva, non trasferibile e revocabile.\n\nL’utente non acquisisce alcun diritto di proprietà sull’app.\n\nÈ vietato:\n- copiare o distribuire l’app\n- condividere l’accesso con terzi\n- concedere l’uso dell’app ad altre persone\n- aggirare i sistemi di pagamento o di licenza\n\nOgni violazione può comportare la sospensione o revoca dell’accesso, senza diritto a rimborso.\n\n4. ABBONAMENTO (Google Play Billing)\n\nL’utilizzo dell’app è consentito solo con un abbonamento attivo acquistato esclusivamente tramite Google Play Store.\n\nLa gestione dei pagamenti, dei rinnovi e delle cancellazioni è effettuata direttamente da Google Play, secondo i suoi termini.\n\nTentativi di utilizzo dell’app senza un abbonamento valido o tramite versioni modificate violano i presenti termini.\n\n5. PRIVACY E TRATTAMENTO DEI DATI\n\nL’app non raccoglie, non memorizza e non condivide i contenuti dei file PDF dell’utente.\n\nEventuali dati tecnici (es. dati anonimi di utilizzo o crash) sono utilizzati solo per il funzionamento e il miglioramento dell’app, nel rispetto delle normative vigenti e delle Google Play Policies.\n\nPer maggiori informazioni, consultare la Privacy Policy disponibile nella scheda Google Play.\n\n6. LIMITAZIONE DI RESPONSABILITÀ\n\nNei limiti consentiti dalla legge, lo sviluppatore non è responsabile per:\n- utilizzo improprio dell’app\n- contenuti visualizzati dall’utente\n- violazioni di copyright commesse dall’utente\n- eventuali danni diretti o indiretti derivanti dall’uso dell’app\n\n7. MODIFICHE AI TERMINI\n\nLo sviluppatore si riserva il diritto di aggiornare o modificare i presenti termini in qualsiasi momento.\nL’uso continuato dell’app implica l’accettazione delle versioni aggiornate."
+            android:textSize="14sp"
+            android:textColor="#000000"/>
 
-        <TextView
-            android:layout_width="match_parent"
+        <Button
+            android:id="@+id/btnConfirmCopyright"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Ringraziamenti"
-            android:textStyle="bold"
-            android:textSize="20sp"
-            android:gravity="center"
-            android:layout_marginBottom="16dp"/>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Grazie per aver scelto Leggo per le tue letture digitali.\n\nSviluppato con passione per rendere la lettura accessibile a tutti.\n\nSi ringraziano:\n- Project Gutenberg (Libri gratuiti)\n- MuPDF (Rendering PDF)\n- Open Source Community"
-            android:gravity="center"
-            android:textSize="16sp"/>
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="32dp"
+            android:text="Confermo di aver letto" 
+            android:visibility="gone"/>
 
     </LinearLayout>
-
 </ScrollView>

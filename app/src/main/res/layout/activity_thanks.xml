@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="24dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ringraziamenti"
+            android:textStyle="bold"
+            android:textSize="24sp"
+            android:gravity="center"
+            android:layout_marginBottom="24dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Desidero ringraziare profondamente mia moglie Silvia Ambrosio, per l’infinita pazienza, il sostegno costante e la comprensione che mi ha dimostrato in questi giorni intensi. La sua presenza silenziosa ma sempre attenta è stata un punto di riferimento fondamentale.\n\nUn ringraziamento speciale va a mia figlia Aurora Botta, che con la sua forza di volontà, il suo incoraggiamento e il suo modo di credere in me mi ha trasmesso energia e determinazione nei momenti più difficili.\n\nRingrazio Enrico Coppola per la fiducia che ha riposto in me e per il supporto dimostrato lungo questo percorso, elementi che hanno avuto un valore importante non solo professionale ma anche umano.\n\nInfine, desidero ringraziare Alessio Ippolito per i consigli, la disponibilità e l’attenzione al design, che hanno contribuito in modo concreto alla qualità del lavoro finale."
+            android:gravity="center"
+            android:textSize="16sp"/>
+
+    </LinearLayout>
+</ScrollView>

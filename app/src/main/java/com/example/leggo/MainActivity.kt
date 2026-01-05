@@ -14,59 +14,55 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import kotlinx.coroutines.launch
 import java.io.File
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : BaseActivity() {
 
     private lateinit var recyclerRecent: RecyclerView
     private lateinit var tvRecentLabel: TextView
 
     private val openFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            // Salva nei recenti
-            val title = it.lastPathSegment ?: "Documento"
-            BookUtils.addRecentBook(this, it, title)
-            loadRecentBooks() // Aggiorna UI
-            
-            val intent = Intent(this, PdfReaderActivity::class.java)
-            intent.data = it
-            startActivity(intent)
+            lifecycleScope.launch {
+                val title = it.lastPathSegment?.split("/")?.last() ?: "Documento"
+                BookUtils.addOrUpdateBook(this@MainActivity, it, title)
+                loadRecentBooks()
+                
+                val intent = Intent(this@MainActivity, PdfReaderActivity::class.java).apply {
+                    data = it
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(intent)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_home_final)
 
         recyclerRecent = findViewById(R.id.recyclerRecentBooks)
         tvRecentLabel = findViewById(R.id.tvRecentLabel)
-        
-        // Griglia 3 colonne
         recyclerRecent.layoutManager = GridLayoutManager(this, 3)
 
-        // Pulsanti Top Bar
-        // NOTA: btnSettings nel layout precedente era il pulsante impostazioni singolo, 
-        // ora abbiamo un btnMenu nel layout activity_main.xml aggiornato
-        // Assicuriamoci che l'ID sia btnMenu nel XML che ho aggiornato prima.
-        // Controllo: nel passo precedente ho usato btnMenu.
-        
-        // btnLibrary -> Biblioteca
+        findViewById<ImageButton>(R.id.btnAddBook).setOnClickListener {
+            openFileLauncher.launch(arrayOf("application/pdf", "application/epub+zip", "text/plain"))
+        }
+
         findViewById<ImageButton>(R.id.btnLibrary).setOnClickListener {
             startActivity(Intent(this, LibraryActivity::class.java))
         }
         
-        // Tasto + (Aggiungi Libro)
-        findViewById<ImageButton>(R.id.btnAddBook).setOnClickListener {
-            openFileLauncher.launch(arrayOf("application/pdf", "application/epub+zip", "text/plain", "application/vnd.google-apps.document"))
+        findViewById<ImageButton>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
         
-        // Menu 3 pallini
-        val btnMenu = findViewById<ImageButton>(R.id.btnMenu)
-        btnMenu.setOnClickListener { view ->
+        findViewById<ImageButton>(R.id.btnMenu).setOnClickListener { view ->
             showPopupMenu(view)
         }
         
@@ -78,7 +74,7 @@ class MainActivity : AppCompatActivity() {
                 intent.putExtra("QUERY", query)
                 startActivity(intent)
             } else {
-                Toast.makeText(this, "Inserisci un titolo per cercare", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.search_books_hint), Toast.LENGTH_SHORT).show()
             }
         }
         
@@ -87,20 +83,12 @@ class MainActivity : AppCompatActivity() {
     
     private fun showPopupMenu(view: View) {
         val popup = PopupMenu(this, view)
-        popup.menu.add(0, 1, 0, "Cestino")
-        popup.menu.add(0, 2, 0, "Copyright e Ringraziamenti")
-        // Impostazioni (opzionale se vogliamo tenerlo qui o separato, l'utente ha chiesto di sostituire/aggiungere)
-        // Se l'utente ha detto "vicino ad impostazioni", forse intendeva che i 3 pallini sono EXTRA.
-        // Ma nel prompt ha detto "icona tre pallini verticali vicino ad impostazioni dove aggiungere un cestino...".
-        // Per pulizia, metto Impostazioni qui dentro o lascio il tasto?
-        // Il layout XML ha tolto btnSettings esplicito e messo btnMenu. Quindi metto Impostazioni nel menu.
-        popup.menu.add(0, 3, 0, "Impostazioni")
-
+        popup.menuInflater.inflate(R.menu.main_menu, popup.menu)
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                1 -> startActivity(Intent(this, TrashActivity::class.java))
-                2 -> startActivity(Intent(this, CreditsActivity::class.java))
-                3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                R.id.menu_trash -> startActivity(Intent(this, TrashActivity::class.java))
+                R.id.menu_copyright -> startActivity(Intent(this, CreditsActivity::class.java))
+                R.id.menu_thanks -> startActivity(Intent(this, ThanksActivity::class.java))
             }
             true
         }
@@ -113,18 +101,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadRecentBooks() {
-        val books = BookUtils.getRecentBooks(this)
-        if (books.isNotEmpty()) {
-            recyclerRecent.visibility = View.VISIBLE
-            tvRecentLabel.visibility = View.VISIBLE
-            recyclerRecent.adapter = RecentBookAdapter(books)
-        } else {
-            recyclerRecent.visibility = View.GONE
-            tvRecentLabel.visibility = View.GONE
+        lifecycleScope.launch {
+            val books = BookUtils.getRecentBooks(this@MainActivity)
+            if (books.isNotEmpty()) {
+                recyclerRecent.visibility = View.VISIBLE
+                tvRecentLabel.visibility = View.VISIBLE
+                recyclerRecent.adapter = RecentBookAdapter(books)
+            } else {
+                recyclerRecent.visibility = View.GONE
+                tvRecentLabel.visibility = View.GONE
+            }
         }
     }
     
-    inner class RecentBookAdapter(private val books: List<BookUtils.RecentBook>) : RecyclerView.Adapter<RecentBookAdapter.ViewHolder>() {
+    inner class RecentBookAdapter(private val books: List<BookUtils.Book>) : RecyclerView.Adapter<RecentBookAdapter.ViewHolder>() {
         
         inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
             val imgCover: ImageView = itemView.findViewById(R.id.imgCover)
@@ -141,22 +131,19 @@ class MainActivity : AppCompatActivity() {
             holder.tvTitle.text = book.title
             
             if (book.coverPath != null && File(book.coverPath).exists()) {
-                holder.imgCover.load(File(book.coverPath)) {
-                    placeholder(R.drawable.leggo)
-                    error(R.drawable.leggo)
-                    crossfade(true)
-                }
+                holder.imgCover.load(File(book.coverPath)) { placeholder(R.drawable.leggo).error(R.drawable.leggo) }
             } else {
                 holder.imgCover.setImageResource(R.drawable.leggo)
             }
             
             holder.itemView.setOnClickListener {
-                val intent = Intent(this@MainActivity, PdfReaderActivity::class.java)
-                intent.data = Uri.parse(book.uriString)
+                val intent = Intent(this@MainActivity, PdfReaderActivity::class.java).apply {
+                    data = Uri.parse(book.uriString)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
                 startActivity(intent)
             }
             
-            // Long click per eliminare (spostare nel cestino)
             holder.itemView.setOnLongClickListener {
                 showDeleteDialog(book)
                 true
@@ -166,16 +153,18 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount() = books.size
     }
     
-    private fun showDeleteDialog(book: BookUtils.RecentBook) {
+    private fun showDeleteDialog(book: BookUtils.Book) {
         AlertDialog.Builder(this)
-            .setTitle("Sposta nel Cestino")
-            .setMessage("Vuoi spostare '${book.title}' nel cestino?")
-            .setPositiveButton("Sposta") { _, _ ->
-                BookUtils.moveToTrash(this, book)
-                loadRecentBooks()
-                Toast.makeText(this, "Libro spostato nel cestino", Toast.LENGTH_SHORT).show()
+            .setTitle(getString(R.string.move_to_trash_title))
+            .setMessage(getString(R.string.move_to_trash_message, book.title))
+            .setPositiveButton(getString(R.string.move)) { _, _ ->
+                lifecycleScope.launch {
+                    BookUtils.moveToTrash(this@MainActivity, book)
+                    loadRecentBooks()
+                }
+                Toast.makeText(this, getString(R.string.book_moved_to_trash), Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Annulla", null)
+            .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }
 }

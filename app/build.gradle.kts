@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.leggo"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -40,13 +40,17 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     
-    // Dipendenza modulo locale MuPDF
-    implementation(project(":mupdf-android-fitz"))
+    implementation(files("libs/mupdf-viewer.aar"))
     
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
     implementation(libs.gson)
     implementation(libs.coil)
+    
+    // Coroutine per operazioni in background
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

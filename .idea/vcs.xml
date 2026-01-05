@@ -2,11 +2,25 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/libmupdf/mupdf-android-fitz" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/libmupdf/mupdf-android-fitz/mupdf/mupdf-android-fitz" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf-android-fitz" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf/mupdf-android-fitz" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz-backup/mupdf/mupdf-android-fitz/mupdf/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/brotli" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/curl" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/extract" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/freeglut" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/freetype" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/freetype/subprojects/dlg" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/gumbo-parser" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/harfbuzz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/jbig2dec" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/lcms2" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/leptonica" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/libjpeg" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/mujs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/openjpeg" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/tesseract" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/zint" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/zlib" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mupdf-android-fitz/libmupdf/thirdparty/zxing-cpp" vcs="Git" />
   </component>
 </project>

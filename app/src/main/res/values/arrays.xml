@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="app_languages">
+        <item>Italiano</item>
+        <item>English</item>
+    </string-array>
+
+    <string-array name="tts_languages">
+        <item>Italiano</item>
+        <item>English</item>
+        <item>Français</item>
+        <item>Deutsch</item>
+        <item>Español</item>
+    </string-array>
+
+    <string-array name="reader_themes">
+        <item>Giorno (Bianco)</item>
+        <item>Pergamena</item>
+        <item>Notte (Nero)</item>
+    </string-array>
+    
+    <string-array name="book_sources">
+        <item>Project Gutenberg (Gutendex)</item>
+        <item>Google Books (Free)</item>
+    </string-array>
+</resources>

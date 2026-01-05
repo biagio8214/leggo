@@ -1,106 +1,116 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:padding="16dp">
 
-    <LinearLayout
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/reading_settings"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="24dp"/>
+
+    <!-- Lingua Applicazione -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/app_language"
+        android:textSize="16sp" />
+    <Spinner
+        android:id="@+id/spinnerAppLang"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="24dp"/>
 
+    <!-- Lingua Lettura Vocale -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/tts_lang"
+        android:textSize="16sp" />
+    <Spinner
+        android:id="@+id/spinnerTtsLang"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
+    <Button
+        android:id="@+id/btnSystemTtsSettings"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Gestisci voci di sistema"
+        android:textSize="12sp"
+        android:layout_gravity="end"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Dimensione Testo -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Lingua Applicazione"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
-
-        <Spinner
-            android:id="@+id/spinnerAppLanguage"
-            android:layout_width="match_parent"
+            android:text="@string/font_size"
+            android:textSize="16sp" />
+        <TextView
+            android:id="@+id/tvTextSizeValue"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp" />
+            android:text="14sp"
+            android:textSize="16sp"
+            android:layout_alignParentEnd="true"/>
+    </RelativeLayout>
+    <SeekBar
+        android:id="@+id/sbTextSize"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="6" 
+        android:min="0"
+        android:progress="0"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="16dp"/>
 
+    <!-- Velocità Lettura -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Lingua Lettura (TTS)"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
-
-        <Spinner
-            android:id="@+id/spinnerTtsLanguage"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp" />
-
+            android:text="@string/tts_speed"
+            android:textSize="16sp" />
         <TextView
+            android:id="@+id/tvTtsSpeedValue"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Velocità Lettura"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp"/>
-            
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <TextView android:text="0.5x" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <SeekBar
-                android:id="@+id/seekSpeed"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:max="5" 
-                android:progress="1" />
-             <!-- Max 5 steps: 0=0.5, 1=1.0, 2=1.5, 3=2.0, 4=2.5, 5=3.0 -->
-            <TextView android:id="@+id/textSpeedValue" android:text="1.0x" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        </LinearLayout>
-        
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Dimensione Testo (14 - 20)"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="8dp"/>
-            
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <TextView android:text="14" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <SeekBar
-                android:id="@+id/seekTextSize"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:max="6" 
-                android:progress="0" />
-            <!-- Max 6 steps: 0=14 ... 6=20 -->
-            <TextView android:id="@+id/textTextSizeValue" android:text="14sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        </LinearLayout>
+            android:text="x1.0"
+            android:textSize="16sp"
+            android:layout_alignParentEnd="true"/>
+    </RelativeLayout>
+    <SeekBar
+        android:id="@+id/sbTtsSpeed"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="4" 
+        android:min="0"
+        android:progress="1"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="16dp"/>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Tema Lettura"
-            android:textStyle="bold"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="8dp"/>
+    <!-- Tema Lettura -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/reader_theme"
+        android:textSize="16sp" />
+    <Spinner
+        android:id="@+id/spinnerReaderTheme"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"/>
 
-        <Spinner
-            android:id="@+id/spinnerTheme"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp" />
-
-        <Button
-            android:id="@+id/btnSaveSettings"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Salva Impostazioni" />
-
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>
