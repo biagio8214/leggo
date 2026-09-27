@@ -1,15 +1,39 @@
+# Android Studio / IntelliJ
+
+.idea/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+
+# Gradle
+
+.gradle/
+build/
+**/build/
+gradle-app.setting
+gradle/gradle-daemon-jvm.properties
+
+# Kotlin
+
+.kotlin/
+
+# Local configuration
+
 local.properties
+
+# VS Code
+
+.vscode/
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Temporary files
+
+*.tmp
+*.log
+
+# Generated / accidental files
+
+FAILURE
+app/build2/

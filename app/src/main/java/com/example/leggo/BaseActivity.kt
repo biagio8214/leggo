@@ -16,8 +16,8 @@ import java.util.Locale
 open class BaseActivity : AppCompatActivity() {
 
     override fun attachBaseContext(newBase: Context) {
-        val prefs = newBase.getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-        val langCode = prefs.getString("app_lang", "it") ?: "it"
+        val leggoSettingsPrefs = newBase.getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
+        val langCode = leggoSettingsPrefs.getString("app_lang", "it") ?: "it"
         val locale = Locale(langCode)
         val config = newBase.resources.configuration
         config.setLocale(locale)

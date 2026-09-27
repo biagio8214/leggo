@@ -5,586 +5,365 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.content.SharedPreferences
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Color
-import android.graphics.RectF
+import android.graphics.*
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
-import android.view.GestureDetector
-import android.view.LayoutInflater
-import android.view.MotionEvent
-import android.view.View
-import android.view.ViewGroup
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
-import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.SeekBar
-import android.widget.TextView
-import android.widget.Toast
-import android.view.Gravity
+import android.view.*
+import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.doOnLayout
-import androidx.core.widget.NestedScrollView
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.artifex.mupdf.fitz.Document
 import com.artifex.mupdf.fitz.Matrix
-import com.artifex.mupdf.fitz.Outline
-import com.google.android.material.appbar.AppBarLayout
-import com.google.android.material.appbar.MaterialToolbar
+import com.artifex.mupdf.fitz.android.AndroidDrawDevice
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStreamReader
-import java.util.zip.ZipInputStream
 import kotlin.math.abs
-import android.text.SpannableString
-import android.text.style.BackgroundColorSpan
+import kotlin.coroutines.resume
+
+data class PdfSentence(
+    val text: String, 
+    val charRects: List<RectF>, 
+    val internalPageIndex: Int,
+    val lineBbox: RectF 
+)
 
 class PdfReaderActivity : BaseActivity() {
 
-    // Aggiunto internalPageIndex per tracciare a quale pagina appartiene la frase in landscape
-    data class Sentence(val text: String, val area: RectF, val internalPageIndex: Int)
-    data class Chapter(val title: String, val pageIndex: Int)
-
     private lateinit var viewPager: ViewPager2
-    private lateinit var fabReadAloud: FloatingActionButton
-    private lateinit var toolbar: MaterialToolbar
-    private lateinit var appBarLayout: AppBarLayout
-    private lateinit var controlsLayout: LinearLayout
-    private lateinit var bottomNavLayout: LinearLayout
     private lateinit var sbPageNav: SeekBar
     private lateinit var tvPageCount: TextView
-    private lateinit var btnChapters: ImageButton
+    private lateinit var fabReadAloud: FloatingActionButton
+    private lateinit var prefs: android.content.SharedPreferences
+    private lateinit var settingsPrefs: android.content.SharedPreferences
+    private lateinit var topAppBarContainer: View
+    private lateinit var bottomNavLayout: View
+    private lateinit var gestureDetector: GestureDetector
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var sideMenu: View
+    private lateinit var tocRecycler: RecyclerView
 
     private var document: Document? = null
-    private var textPages: List<String>? = null
-    private var chapters: List<Chapter> = emptyList()
-    private lateinit var prefs: SharedPreferences
+    private var isDualPage = false
+    private var bookId: String = ""
+
     private var readingService: ReadingService? = null
     private var isBound = false
-    private var bookId: String = "unknown_book"
-    private var fileType: String = "pdf"
-    private var pageSentences: MutableMap<Int, List<Sentence>> = mutableMapOf()
-    private val highlightColor = Color.parseColor("#80B2EBF2") // Celeste semi-trasparente
-
     private var autoPlayNextPage = false
-    private var currentTextSize: Int = 14
+    private var isTranslationEnabled = false
+    private var targetLangCode = "it"
+    private val supportedLanguages = mapOf(
+        "Italiano" to "it",
+        "Inglese" to "en",
+        "Francese" to "fr",
+        "Spagnolo" to "es",
+        "Tedesco" to "de",
+        "Portoghese" to "pt",
+        "Russo" to "ru"
+    )
+    private val translatedPages = mutableMapOf<Int, String>()
+    private val pageSentences = mutableMapOf<Int, List<PdfSentence>>()
+    
+    private var currentHighlightBlockIndex: Int = -1
+    private var currentHighlightStart: Int = -1
+    private var currentHighlightEnd: Int = -1
 
-    // UI visibility handling
     private val hideHandler = Handler(Looper.getMainLooper())
-    private val hideRunnable = Runnable { hideSystemUIAndBars() }
+    private val hideRunnable = Runnable { hideBars() }
     private var areBarsVisible = true
 
-    private var isLandscape = false
-
     private val connection = object : ServiceConnection {
-        override fun onServiceConnected(className: ComponentName, service: IBinder) {
-            val binder = service as ReadingService.LocalBinder
-            readingService = binder.getService()
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            readingService = (service as? ReadingService.LocalBinder)?.getService()
             isBound = true
-
-            applySettingsToService()
-
             readingService?.setCallback(object : ReadingService.ReadingCallback {
                 override fun onBlockSpoken(startIndex: Int) {
-                    runOnUiThread {
-                        clearAllHighlights()
-                        highlightLines(startIndex, 5)  // MODIFICA: Evidenzia 5 linee invece di 1
-                        saveReadingProgress(startIndex)
-                    }
+                    currentHighlightBlockIndex = startIndex
+                    currentHighlightStart = -1
+                    currentHighlightEnd = -1
+                    runOnUiThread { highlightCurrentRange() }
                 }
-                override fun onReadingStopped() {
-                    runOnUiThread {
-                        clearAllHighlights()
-                        fabReadAloud.setImageResource(android.R.drawable.ic_lock_silent_mode_off)
-                    }
+                
+                override fun onWordRangeSpoken(blockIndex: Int, start: Int, end: Int) {
+                    currentHighlightBlockIndex = blockIndex
+                    currentHighlightStart = start
+                    currentHighlightEnd = end
+                    runOnUiThread { highlightCurrentRange() }
                 }
+
+                override fun onReadingStopped() { 
+                    runOnUiThread { 
+                        clearAllHighlights()
+                        fabReadAloud.setImageResource(android.R.drawable.ic_media_play) 
+                    } 
+                }
+                
                 override fun onReadingFinished() {
                     runOnUiThread {
-                        val adapter = viewPager.adapter ?: return@runOnUiThread
-                        val current = viewPager.currentItem
-                        if (current < adapter.itemCount - 1) {
+                        if (viewPager.currentItem < (viewPager.adapter?.itemCount ?: 0) - 1) {
                             autoPlayNextPage = true
-                            viewPager.setCurrentItem(current + 1, true)
+                            viewPager.currentItem += 1
                         } else {
-                            fabReadAloud.setImageResource(android.R.drawable.ic_lock_silent_mode_off)
-                            Toast.makeText(this@PdfReaderActivity, "Lettura completata", Toast.LENGTH_SHORT).show()
+                            fabReadAloud.setImageResource(android.R.drawable.ic_media_play)
                         }
                     }
                 }
             })
-            if (readingService?.isReading() == true) {
-                fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
-            }
+            updateTtsSettings()
         }
-
-        override fun onServiceDisconnected(arg0: ComponentName) {
-            isBound = false
-            readingService = null
-        }
+        override fun onServiceDisconnected(name: ComponentName?) { isBound = false }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_pdf_reader)
-        prefs = getSharedPreferences("LeggoBookmarks", Context.MODE_PRIVATE)
-        val settingsPrefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-        currentTextSize = settingsPrefs.getInt("text_size", 14)
 
-        isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        initViews()
-        initService()
-        loadContent()
-
-        // Initial visibility
-        showBars()
-        delayedHide(5000)
-    }
-
-    private fun initViews() {
-        toolbar = findViewById(R.id.topAppBar)
-        appBarLayout = findViewById(R.id.topAppBarContainer)
         viewPager = findViewById(R.id.viewPager)
-        fabReadAloud = findViewById(R.id.fabReadAloud)
-        controlsLayout = findViewById(R.id.controlsLayout)
-        bottomNavLayout = findViewById(R.id.bottomNavLayout)
         sbPageNav = findViewById(R.id.sbPageNav)
         tvPageCount = findViewById(R.id.tvPageCount)
-        btnChapters = findViewById(R.id.btnChapters)
+        fabReadAloud = findViewById(R.id.fabReadAloud)
+        topAppBarContainer = findViewById(R.id.topAppBarContainer)
+        bottomNavLayout = findViewById(R.id.bottomNavLayout)
+        drawerLayout = findViewById(R.id.drawerLayout)
+        sideMenu = findViewById(R.id.sideMenu)
+        tocRecycler = findViewById(R.id.btnChapters)
+        
+        prefs = getSharedPreferences("LeggoBookmarks", Context.MODE_PRIVATE)
+        settingsPrefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
 
-        viewPager.setBackgroundColor(Color.TRANSPARENT)
-        viewPager.getChildAt(0).overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+        isDualPage = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        
+        val uri = intent.data ?: return
+        bookId = uri.lastPathSegment?.replace(Regex("[^a-zA-Z0-9]"), "_") ?: "book"
 
-        findViewById<ImageButton>(R.id.btnSettingsOverlay).setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        findViewById<ImageButton>(R.id.btnSaveBookmark).setOnClickListener { saveBookmark() }
-        findViewById<ImageButton>(R.id.btnLoadBookmark).setOnClickListener { loadBookmark() }
-
-        findViewById<ImageButton>(R.id.btnPrev).setOnClickListener { readingService?.movePosition(-1) }
-        findViewById<ImageButton>(R.id.btnNext).setOnClickListener { readingService?.movePosition(1) }
-
-        btnChapters.setOnClickListener { showChaptersDialog() }
-
-        fabReadAloud.setOnClickListener { toggleReading() }
-
-        sbPageNav.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    viewPager.setCurrentItem(progress, false)
-                    updatePageCounter(progress)
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (e1 != null && e2 != null && e1.y - e2.y > 80) {
+                    showBars()
+                    return true
                 }
+                return false
             }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                hideHandler.removeCallbacks(hideRunnable)
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (areBarsVisible) hideBars() else showBars()
+                return true
             }
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                delayedHide(5000)
+            override fun onLongPress(e: MotionEvent) {
+                handlePdfLongPress()
             }
         })
-    }
 
-    private fun updatePageCounter(currentItem: Int) {
-        val pageIndex = if (isLandscape) currentItem * 2 else currentItem
-        val totalPages = if (document != null) document!!.countPages() else (textPages?.size ?: 0)
-
-        if (isLandscape) {
-            val page2 = if (pageIndex + 2 <= totalPages) "- ${pageIndex + 2}" else ""
-            tvPageCount.text = getString(R.string.page_count_landscape, pageIndex + 1, page2, totalPages)
+        val intentService = Intent(this, ReadingService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intentService)
         } else {
-            tvPageCount.text = getString(R.string.page_count, pageIndex + 1, totalPages)
+            startService(intentService)
         }
-    }
+        bindService(intentService, connection, Context.BIND_AUTO_CREATE)
 
-    private fun initService() {
-        val serviceIntent = Intent(this, ReadingService::class.java)
-        startService(serviceIntent)
-        bindService(serviceIntent, connection, Context.BIND_AUTO_CREATE)
-    }
-
-    private fun loadContent() {
-        val uri = intent.data
-        if (uri != null) {
-            bookId = uri.lastPathSegment?.split("/")?.last() ?: "Libro senza nome"
-            toolbar.title = bookId
-            val mimeType = contentResolver.getType(uri) ?: ""
-            fileType = when {
-                mimeType == "application/pdf" || bookId.endsWith(".pdf", true) -> "pdf"
-                mimeType == "application/epub+zip" || bookId.endsWith(".epub", true) -> "epub"
-                else -> "txt"
-            }
-
-            lifecycleScope.launch {
-                when (fileType) {
-                    "pdf" -> openPdfDocument(uri)
-                    "epub" -> openEpubDocument(uri) // Modificato: ora estrae testo e usa TextPagerAdapter per migliore allineamento
-                    "txt" -> openTxtDocument(uri)
-                }
-
-                if (chapters.isNotEmpty()) {
-                    btnChapters.visibility = View.VISIBLE
-                }
-            }
-        } else {
-            Toast.makeText(this, getString(R.string.no_file_to_read), Toast.LENGTH_SHORT).show()
-            finish()
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        val currentPageItem = viewPager.currentItem
-        val absolutePage = if (isLandscape) currentPageItem * 2 else currentPageItem
-
-        if (readingService?.isReading() != true) {
-            with(prefs.edit()) {
-                putInt("${bookId}_page", absolutePage)
-                apply()
-            }
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-
-        val settingsPrefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-        val newTextSize = settingsPrefs.getInt("text_size", 14)
-        val newIsLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-        // Se cambia orientamento o dimensione testo, ricarichiamo tutto
-        // Per EPUB il testo size cambia il layout, quindi serve reload documento
-        if (newTextSize != currentTextSize || newIsLandscape != isLandscape) {
-            currentTextSize = newTextSize
-            isLandscape = newIsLandscape
-            // Ricarica contenuto per applicare nuovo layout (specie per epub)
-            val uri = intent.data
-            if (uri != null && (fileType == "epub" || fileType == "txt")) {
-                lifecycleScope.launch {
-                    if (fileType == "epub") openEpubDocument(uri)
-                    else openTxtDocument(uri)
-                }
-            } else {
-                // Per PDF normale basta aggiornare adapter per landscape/portrait
-                if (document != null) setupPdfViewPager()
-                loadLastPosition()
-            }
-        }
-
+        loadPdf(uri)
+        setupButtons()
         applyTheme()
-        if (isBound) applySettingsToService()
-        viewPager.adapter?.notifyDataSetChanged()
+        
+        topAppBarContainer.post { hideBars() }
     }
 
-    private fun toggleBars() {
-        if (areBarsVisible) {
-            hideSystemUIAndBars()
+    private fun handlePdfLongPress() {
+        if (isTranslationEnabled) {
+            isTranslationEnabled = false
+            translatedPages.clear()
+            if (::viewPager.isInitialized && viewPager.adapter != null) {
+                viewPager.adapter!!.notifyItemChanged(viewPager.currentItem)
+            }
+            updateTtsSettings()
+            lifecycleScope.launch { extractTextFromPage(viewPager.currentItem) }
+            Toast.makeText(this, "Traduzione Disattivata", Toast.LENGTH_SHORT).show()
         } else {
-            showBars()
-            delayedHide(5000)
+            val languages = supportedLanguages.keys.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Scegli lingua traduzione")
+                .setItems(languages) { _, which ->
+                    val selectedName = languages[which]
+                    targetLangCode = supportedLanguages[selectedName] ?: "it"
+                    isTranslationEnabled = true
+                    translatedPages.clear()
+                    if (::viewPager.isInitialized && viewPager.adapter != null) {
+                        viewPager.adapter!!.notifyItemChanged(viewPager.currentItem)
+                    }
+                    updateTtsSettings()
+                    lifecycleScope.launch { extractTextFromPage(viewPager.currentItem) }
+                    Toast.makeText(this, "Traduzione in $selectedName attivata", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Annulla", null)
+                .show()
+        }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun setupButtons() {
+        findViewById<ImageButton>(R.id.btnSettingsOverlay).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            drawerLayout.closeDrawers()
+        }
+
+        findViewById<ImageButton>(R.id.btnSaveBookmark).setOnClickListener {
+            val blockIndex = readingService?.getCurrentSentenceIndex() ?: 0
+            prefs.edit()
+                .putInt("${bookId}_page", viewPager.currentItem)
+                .putInt("${bookId}_block", blockIndex)
+                .apply()
+            Toast.makeText(this, "Posizione salvata!", Toast.LENGTH_SHORT).show()
+            drawerLayout.closeDrawers()
+        }
+
+        findViewById<ImageButton>(R.id.btnLoadBookmark).setOnClickListener {
+            val savedPage = prefs.getInt("${bookId}_page", -1)
+            val savedBlock = prefs.getInt("${bookId}_block", 0)
+            if (savedPage != -1) {
+                viewPager.setCurrentItem(savedPage, false)
+                lifecycleScope.launch {
+                    extractTextFromPage(savedPage)
+                    startReadingWithPotentialTranslation(savedPage, savedBlock)
+                }
+            }
+            drawerLayout.closeDrawers()
+        }
+
+        findViewById<ImageButton>(R.id.btnNext).setOnClickListener {
+            delayedHide()
+            if (readingService?.isReading() == true) readingService?.skipForward(1)
+            else viewPager.currentItem += 1
+        }
+
+        findViewById<ImageButton>(R.id.btnPrev).setOnClickListener {
+            delayedHide()
+            if (readingService?.isReading() == true) readingService?.skipBackward(1)
+            else viewPager.currentItem -= 1
+        }
+
+        findViewById<View>(R.id.topAppBar).setOnClickListener { drawerLayout.openDrawer(sideMenu) }
+        fabReadAloud.setOnClickListener { 
+            delayedHide()
+            toggleReading() 
         }
     }
 
     private fun showBars() {
-        appBarLayout.animate().translationY(0f).setInterpolator(DecelerateInterpolator(2f)).start()
-        controlsLayout.animate().translationY(0f).setInterpolator(DecelerateInterpolator(2f)).start()
+        topAppBarContainer.visibility = View.VISIBLE
         bottomNavLayout.visibility = View.VISIBLE
-        bottomNavLayout.animate().translationY(0f).setInterpolator(DecelerateInterpolator(2f)).start()
+        topAppBarContainer.animate().translationY(0f).setDuration(300).start()
+        bottomNavLayout.animate().translationY(0f).setDuration(300).start()
         areBarsVisible = true
+        delayedHide()
     }
 
-    private fun hideSystemUIAndBars() {
-        appBarLayout.animate().translationY(-appBarLayout.height.toFloat()).setInterpolator(AccelerateInterpolator(2f)).start()
-        controlsLayout.animate().translationY(-appBarLayout.height.toFloat() - controlsLayout.height.toFloat()).setInterpolator(AccelerateInterpolator(2f)).start()
-        bottomNavLayout.animate().translationY(bottomNavLayout.height.toFloat()).setInterpolator(AccelerateInterpolator(2f)).withEndAction {
+    private fun hideBars() {
+        topAppBarContainer.animate().translationY(-topAppBarContainer.height.toFloat()).setDuration(300).withEndAction {
+            topAppBarContainer.visibility = View.GONE
+        }.start()
+        bottomNavLayout.animate().translationY(bottomNavLayout.height.toFloat()).setDuration(300).withEndAction {
             bottomNavLayout.visibility = View.GONE
         }.start()
         areBarsVisible = false
     }
 
-    private fun delayedHide(delayMillis: Long) {
+    private fun delayedHide() {
         hideHandler.removeCallbacks(hideRunnable)
-        hideHandler.postDelayed(hideRunnable, delayMillis)
+        hideHandler.postDelayed(hideRunnable, 5000)
     }
 
-    private suspend fun openPdfDocument(uri: Uri) = withContext(Dispatchers.IO) {
-        loadMuPdfDocument(uri, "temp.pdf")
+    override fun onResume() {
+        super.onResume()
+        applyTheme()
+        updateTtsSettings()
+        viewPager.adapter?.notifyDataSetChanged()
     }
 
-    private suspend fun openEpubDocument(uri: Uri) = withContext(Dispatchers.IO) {
-        try {
-            val tempFile = File(cacheDir, "temp.epub")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(tempFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-
-            // --- INIZIO CORREZIONE: Rimozione uso di MuPDF per estrazione testo EPUB ---
-            // MuPDF `toStructuredText` su EPUB può ritornare caratteri di formattazione non corretti (solo numeri).
-            // Usiamo invece una libreria standard o un parser HTML semplificato, ma dato che non vogliamo aggiungere deps,
-            // proviamo a estrarre il testo grezzo dai file XHTML/HTML contenuti nell'EPUB.
-            // Questa è una soluzione "artigianale" robusta che evita i problemi di rendering di MuPDF per il testo puro.
-            
-            // In alternativa, se vogliamo mantenere MuPDF per il parsing della struttura (capitoli), possiamo usarlo
-            // ma estrarre il testo in modo diverso. Tuttavia, il problema "solo numeri" suggerisce un problema di font/encoding in MuPDF.
-            
-            // Proviamo a mantenere MuPDF per la struttura dei capitoli e il conteggio pagine "virtuali",
-            // ma l'estrazione del testo la facciamo diversamente se MuPDF fallisce o ritorna spazzatura.
-            
-            // TENTATIVO MIGLIORATO CON MUPDF:
-            // Spesso il problema "numeri" è dovuto a `toStructuredText("preserve-whitespace")`.
-            // Proviamo senza opzioni o con `toText()`.
-            
-            val doc = Document.openDocument(tempFile.absolutePath)
-            doc.layout(1000f, 1500f, currentTextSize.toFloat())
-
-            val extractedChapters = mutableListOf<Chapter>()
-            val outline: Array<Outline>? = doc.loadOutline()
-
-            if (outline != null) {
-                fun extractChapters(items: Array<Outline>) {
-                    for (item in items) {
-                        var pageIndex = -1
-                        if (item.uri != null) {
-                            try {
-                                pageIndex = doc.pageNumberFromLocation(doc.resolveLink(item.uri))
-                            } catch (e: Exception) { }
-                        }
-
-                        if (pageIndex >= 0) {
-                            extractedChapters.add(Chapter(item.title ?: "Capitolo", pageIndex))
-                        }
-
-                        if (item.down != null) {
-                            extractChapters(item.down)
-                        }
-                    }
-                }
-                extractChapters(outline)
-            }
-
-            val fullText = StringBuilder()
-            val totalPages = doc.countPages()
-            
-            // CORREZIONE CRITICA: Usare un metodo di estrazione più semplice che di solito funziona meglio sugli EPUB reflowable
-            for (i in 0 until totalPages) {
-                val page = doc.loadPage(i)
-                try {
-                    // Proviamo a estrarre tutto il testo come blocco unico invece di strutturato che può confondersi
-                    // con gli stili CSS complessi
-                    val textBytes = page.textAsByte(0) // 0 = formato text semplice
-                    // Se textAsByte non è disponibile o ritorna null, fallback su structured
-                    // Ma MuPDF java binding spesso non espone textAsByte direttamente come stringa facile.
-                    
-                    // Riprova con structured text ma iterando diversamente
-                    val stext = page.toStructuredText(null) // null options
-                    var pageString = ""
-                    for (block in stext.blocks) {
-                        for (line in block.lines) {
-                            for (char in line.chars) {
-                                pageString += char.c.toChar()
-                            }
-                            pageString += "\n"
-                        }
-                        pageString += "\n"
-                    }
-                    fullText.append(pageString).append("\n\n")
-                    stext.destroy()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                } finally {
-                    page.destroy()
-                }
-            }
-            doc.destroy()
-
-            var cleaned = fullText.toString()
-            // Pulizia aggressiva se vengono rilevati troppi caratteri non testuali o solo numeri in modo sospetto
-            // Ma per ora limitiamoci alla pulizia standard
-            cleaned = cleaned.replace("\r\n", "\n")
-                .replace("\r", "\n")
-                .replace(Regex("\\n{3,}"), "\n\n")
-                .lines().joinToString("\n") { it.trim() }.trim()
-
-            // Se il testo estratto è vuoto o sospetto, potremmo dover implementare un fallback (es. unzip epub)
-            // Ma proviamo prima questa fix sulla modalità di estrazione.
-
-            val charsPerPage = if (currentTextSize > 18) 800 else if (currentTextSize > 16) 1200 else 1500
-
-            withContext(Dispatchers.Main) {
-                chapters = extractedChapters
-                paginateText(cleaned, charsPerPage)
-                setupTextViewPager()
-                loadLastPosition()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@PdfReaderActivity, getString(R.string.epub_error), Toast.LENGTH_SHORT).show()
-            }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val wasDual = isDualPage
+        isDualPage = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (wasDual != isDualPage) {
+            val currentPos = viewPager.currentItem
+            val targetPos = if (isDualPage) currentPos / 2 else currentPos * 2
+            setupPdfViewPager()
+            viewPager.setCurrentItem(targetPos, false)
         }
     }
 
-    private suspend fun loadMuPdfDocument(uri: Uri, tempFileName: String) {
-        try {
-            val tempFile = File(cacheDir, tempFileName)
-            // Copia solo se non esiste o forziamo reload? Per sicurezza copiamo sempre o controlliamo hash.
-            // Qui copiamo sempre per semplicità.
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(tempFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
+    private fun updateTtsSettings() {
+        val speed = settingsPrefs.getFloat("tts_speed", 1.0f)
+        val lang = if (isTranslationEnabled) {
+            supportedLanguages.entries.find { it.value == targetLangCode }?.key ?: "Italiano"
+        } else {
+            settingsPrefs.getString("tts_lang", "Italiano") ?: "Italiano"
+        }
+        val voice = if (isTranslationEnabled) null else settingsPrefs.getString("tts_voice_name", null)
+        readingService?.updateSettings(speed, lang, voice)
+    }
 
-            val doc = Document.openDocument(tempFile.absolutePath)
-
-            // Imposta dimensione font per reflowable (EPUB)
-            if (tempFileName.endsWith(".epub")) {
-                // MuPDF layout usa EM o Point? Solitamente una dimensione base.
-                // 12 è default. Mappiamo currentTextSize (che è sp 14-20) a qualcosa di ragionevole.
-                // Proviamo a passare direttamente il valore o scalato.
-                doc.layout(1000f, 1500f, currentTextSize.toFloat())
-            }
-
-            val extractedChapters = mutableListOf<Chapter>()
-            val outline: Array<Outline>? = doc.loadOutline()
-
-            if (outline != null) {
-                fun extractChapters(items: Array<Outline>) {
-                    for (item in items) {
-                        var pageIndex = -1
-                        if (item.uri != null) {
-                            try {
-                                pageIndex = doc.pageNumberFromLocation(doc.resolveLink(item.uri))
-                            } catch (e: Exception) { }
-                        }
-
-                        if (pageIndex >= 0) {
-                            extractedChapters.add(Chapter(item.title ?: "Capitolo", pageIndex))
-                        }
-
-                        if (item.down != null) {
-                            extractChapters(item.down)
-                        }
+    private fun loadPdf(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val tempFile = File(cacheDir, "temp_pdf_reader.pdf")
+                val inputStream = contentResolver.openInputStream(uri)
+                if (inputStream == null) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@PdfReaderActivity, "Errore: Impossibile accedere al file PDF", Toast.LENGTH_LONG).show()
                     }
+                    return@launch
                 }
-                extractChapters(outline)
-            }
-
-            withContext(Dispatchers.Main) {
+                inputStream.use { input ->
+                    FileOutputStream(tempFile).use { output -> input.copyTo(output) }
+                }
+                
+                val doc = Document.openDocument(tempFile.absolutePath)
+                if (doc == null || doc.countPages() <= 0) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@PdfReaderActivity, "Errore: Il documento PDF è vuoto o corrotto", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
                 document = doc
-                chapters = extractedChapters
-                setupPdfViewPager()
-                loadLastPosition()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@PdfReaderActivity, getString(R.string.pdf_error), Toast.LENGTH_SHORT).show()
+                withContext(Dispatchers.Main) { setupPdfViewPager() }
+            } catch (e: Exception) {
+                Log.e("PdfReaderActivity", "Errore apertura PDF: ${e.message}", e)
+                withContext(Dispatchers.Main) { 
+                    Toast.makeText(this@PdfReaderActivity, "Errore apertura PDF: ${e.localizedMessage ?: "File non valido"}", Toast.LENGTH_LONG).show() 
+                }
             }
         }
-    }
-
-    private suspend fun openTxtDocument(uri: Uri) = withContext(Dispatchers.IO) {
-        try {
-            val inputStream = contentResolver.openInputStream(uri)
-            val reader = BufferedReader(InputStreamReader(inputStream, "UTF-8"))
-            val rawText = reader.readText()
-
-            var cleaned = rawText.replace("\r\n", "\n").replace("\r", "\n")
-            cleaned = cleaned.replace(Regex("\\n{3,}"), "\n\n")
-            cleaned = cleaned.lines().joinToString("\n") { it.trim() }
-
-            // Paginiamo in base al font size approssimativamente (più grande il font, meno caratteri)
-            val charsPerPage = if (currentTextSize > 18) 800 else 1500
-
-            withContext(Dispatchers.Main) {
-                paginateText(cleaned, charsPerPage)
-                setupTextViewPager()
-                loadLastPosition()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@PdfReaderActivity, getString(R.string.txt_error), Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun paginateText(text: String, pageSize: Int) {
-        val pages = mutableListOf<String>()
-        var start = 0
-        val len = text.length
-        while (start < len) {
-            var end = (start + pageSize).coerceAtMost(len)
-            if (end < len) {
-                val lastSpace = text.lastIndexOf(' ', end)
-                val lastNewLine = text.lastIndexOf('\n', end)
-                val cutPoint = maxOf(lastSpace, lastNewLine)
-                if (cutPoint > start) end = cutPoint
-            }
-            pages.add(text.substring(start, end).trim())
-            start = end + 1
-        }
-        this.textPages = pages
-    }
-
-    private fun showChaptersDialog() {
-        if (chapters.isEmpty()) {
-            Toast.makeText(this, "Nessun indice disponibile", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val chapterTitles = chapters.map { it.title }.toTypedArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("Indice")
-            .setItems(chapterTitles) { _, which ->
-                val selectedChapter = chapters[which]
-                val targetPage = selectedChapter.pageIndex
-                val viewPagerItem = if (isLandscape) targetPage / 2 else targetPage
-                viewPager.setCurrentItem(viewPagerItem, false)
-                Toast.makeText(this, "Vai a: ${selectedChapter.title}", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Chiudi", null)
-            .show()
     }
 
     private fun setupPdfViewPager() {
         document?.let { doc ->
-            viewPager.offscreenPageLimit = 1
-            val totalPages = doc.countPages()
-            val adapterItemCount = if (isLandscape) (totalPages + 1) / 2 else totalPages
-
             viewPager.adapter = PdfPagerAdapter(doc)
-            sbPageNav.max = adapterItemCount - 1
-
+            sbPageNav.max = (if (isDualPage) (doc.countPages() + 1) / 2 else doc.countPages()) - 1
             viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
                 override fun onPageSelected(position: Int) {
-                    super.onPageSelected(position)
-
-                    sbPageNav.progress = position
-                    updatePageCounter(position)
-
-                    readingService?.stopReading()
-                    fabReadAloud.setImageResource(android.R.drawable.ic_lock_silent_mode_off)
-
-                    val holder = getViewHolder(position)
-                    if (holder is PdfPageViewHolder) {
-                        holder.zoomLayout.resetZoom()
+                    sbPageNav.progress = position; updatePageCounter(position)
+                    if (!autoPlayNextPage) {
+                        readingService?.stopReading()
+                        fabReadAloud.setImageResource(android.R.drawable.ic_media_play)
                     }
                     lifecycleScope.launch { extractTextFromPage(position) }
                 }
@@ -592,634 +371,362 @@ class PdfReaderActivity : BaseActivity() {
         }
     }
 
-    private fun setupTextViewPager() {
-        textPages?.let { pages ->
-            val totalPages = pages.size
-            val adapterItemCount = if (isLandscape) (totalPages + 1) / 2 else totalPages
-
-            viewPager.adapter = TextPagerAdapter(pages)
-            sbPageNav.max = adapterItemCount - 1
-
-            viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
-                override fun onPageSelected(position: Int) {
-                    super.onPageSelected(position)
-
-                    sbPageNav.progress = position
-                    updatePageCounter(position)
-
-                    readingService?.stopReading()
-                    fabReadAloud.setImageResource(android.R.drawable.ic_lock_silent_mode_off)
-
-                    lifecycleScope.launch { extractTextFromPage(position) }
-                }
-            })
-        }
-    }
-
-    private fun getViewHolder(position: Int): RecyclerView.ViewHolder? {
-        val recyclerView = viewPager.getChildAt(0) as? RecyclerView
-        return recyclerView?.findViewHolderForAdapterPosition(position)
+    private fun updatePageCounter(pos: Int) {
+        val total = document?.countPages() ?: 0
+        val current = if (isDualPage) (pos * 2 + 1) else (pos + 1)
+        tvPageCount.text = "$current / $total"
     }
 
     private suspend fun extractTextFromPage(viewPagerIndex: Int) {
-        val pageIndices = if (isLandscape) {
-            val p1 = viewPagerIndex * 2
-            val p2 = p1 + 1
-            listOf(p1, p2)
-        } else {
-            listOf(viewPagerIndex)
+        val pageIndices = if (isDualPage) listOf(viewPagerIndex * 2, viewPagerIndex * 2 + 1) else listOf(viewPagerIndex)
+        
+        if (isTranslationEnabled) {
+            val combined = mutableListOf<PdfSentence>()
+            for (pIdx in pageIndices) {
+                if (document != null && pIdx >= document!!.countPages()) continue
+                var text = translatedPages[pIdx]
+                if (text == null) {
+                    val original = withContext(Dispatchers.IO) { extractTextString(pIdx) }
+                    if (original.isNotBlank()) {
+                        text = suspendTranslate(original)
+                        translatedPages[pIdx] = text
+                    } else {
+                        text = ""
+                    }
+                }
+                text?.split("\n")?.forEach { line ->
+                    if (line.isNotBlank()) combined.add(PdfSentence(line.trim(), emptyList(), pIdx, RectF()))
+                }
+            }
+            withContext(Dispatchers.Main) {
+                pageSentences[viewPagerIndex] = combined
+                readingService?.setSentences(combined.map { it.text }, 0)
+                updateTtsSettings()
+                if (autoPlayNextPage) {
+                    autoPlayNextPage = false
+                    readingService?.startReading()
+                    fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
+                }
+            }
+            return
         }
 
-        val combinedSentences = mutableListOf<Sentence>()
-
-        val savedPage = prefs.getInt("${bookId}_page", -1)
-        val isCurrentPage = if (isLandscape) (savedPage / 2 == viewPagerIndex) else (savedPage == viewPagerIndex)
-        val savedSentenceIndex = if (isCurrentPage) prefs.getInt("${bookId}_sentence", 0) else 0
-
+        val combined = mutableListOf<PdfSentence>()
         withContext(Dispatchers.IO) {
-            val totalDocPages = if (document != null) document!!.countPages() else (textPages?.size ?: 0)
-
-            for (pIdx in pageIndices) {
-                if (pIdx >= totalDocPages) continue
-
-                if (document != null) {
-                    document?.let { doc ->
-                        try {
-                            val page = doc.loadPage(pIdx)
-                            val stext = page.toStructuredText("preserve-images")
-                            for (block in stext.blocks) {
-                                for (line in block.lines) {
-                                    val lineText = line.chars.joinToString("") { Character.toString(it.c) }
-                                    if (lineText.isNotBlank()) {
-                                        val r = line.bbox
-                                        // Salviamo anche l'indice pagina interno per distinguere Sx e Dx
-                                        combinedSentences.add(Sentence(lineText, RectF(r.x0, r.y0, r.x1, r.y1), pIdx))
-                                    }
-                                }
+            document?.let { doc ->
+                for (pIdx in pageIndices) {
+                    if (pIdx >= doc.countPages()) continue
+                    val page = doc.loadPage(pIdx)
+                    val stext = page.toStructuredText() 
+                    val pageSentencesList = mutableListOf<PdfSentence>()
+                    
+                    for (block in stext.blocks) {
+                        for (line in block.lines) {
+                            val textBuilder = StringBuilder()
+                            val charRects = mutableListOf<RectF>()
+                            for (char in line.chars) {
+                                textBuilder.append(char.c.toChar())
+                                // MuPDF Quad ha i campi ul_x, ul_y, ur_x, ur_y, ll_x, ll_y, lr_x, lr_y
+                                val q = char.quad
+                                val minX = minOf(q.ul_x, q.ur_x, q.ll_x, q.lr_x)
+                                val maxX = maxOf(q.ul_x, q.ur_x, q.ll_x, q.lr_x)
+                                val minY = minOf(q.ul_y, q.ur_y, q.ll_y, q.lr_y)
+                                val maxY = maxOf(q.ul_y, q.ur_y, q.ll_y, q.lr_y)
+                                charRects.add(RectF(minX, minY, maxX, maxY))
                             }
-                            stext.destroy()
-                            page.destroy()
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
-                } else {
-                    textPages?.getOrNull(pIdx)?.let { pageText ->
-                        var start = 0
-                        for (i in pageText.indices) {
-                            if (pageText[i] == '.' || pageText[i] == '\n') {
-                                if (i > start) {
-                                    val sText = pageText.substring(start, i + 1).trim()
-                                    if (sText.isNotBlank()) {
-                                        combinedSentences.add(Sentence(sText, RectF(start.toFloat(), 0f, (i + 1).toFloat(), 0f), pIdx))
-                                    }
-                                }
-                                start = i + 1
+                            val text = textBuilder.toString()
+                            if (text.isNotBlank()) {
+                                val lb = line.bbox
+                                pageSentencesList.add(PdfSentence(
+                                    text, 
+                                    charRects, 
+                                    pIdx, 
+                                    RectF(lb.x0, lb.y0, lb.x1, lb.y1)
+                                ))
                             }
                         }
-                        if (start < pageText.length) combinedSentences.add(Sentence(pageText.substring(start).trim(), RectF(start.toFloat(), 0f, pageText.length.toFloat(), 0f), pIdx))
                     }
+                    combined.addAll(pageSentencesList)
+                    stext.destroy(); page.destroy()
                 }
             }
         }
-
-        withContext(Dispatchers.Main) {
-            pageSentences[viewPagerIndex] = combinedSentences
-            readingService?.setSentences(combinedSentences.map { it.text }, savedSentenceIndex)
-            checkAutoPlay()
+        withContext(Dispatchers.Main) { 
+            pageSentences[viewPagerIndex] = combined
+            readingService?.setSentences(combined.map { it.text }, 0)
+            if (autoPlayNextPage) { 
+                autoPlayNextPage = false
+                readingService?.startReading()
+                fabReadAloud.setImageResource(android.R.drawable.ic_media_pause) 
+            }
         }
     }
 
-    private fun checkAutoPlay() {
-        if (autoPlayNextPage) {
-            autoPlayNextPage = false
+    private fun startReadingWithPotentialTranslation(pageIndex: Int, blockIndex: Int) {
+        lifecycleScope.launch {
+            extractTextFromPage(pageIndex)
             readingService?.startReading()
+            readingService?.skipForward(blockIndex)
             fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
         }
     }
 
-    // MODIFICA: Rinominata e modificata per evidenziare multiple linee (default 5)
-    private fun highlightLines(startIndex: Int, numLines: Int = 5) {
-        val currentPageItem = viewPager.currentItem
-        val holder = getViewHolder(currentPageItem) ?: return
+    private suspend fun suspendTranslate(text: String): String = suspendCancellableCoroutine { cont ->
+        TranslationHelper.translate(text, null, targetLangCode, { res ->
+            cont.resume(res)
+        }, {
+            cont.resume(text)
+        })
+    }
 
-        val sentencesOnScreen = pageSentences[currentPageItem] ?: return
-        val endIndex = (startIndex + numLines - 1).coerceAtMost(sentencesOnScreen.size - 1)
-        val linesToHighlight = sentencesOnScreen.subList(startIndex, endIndex + 1)
-
-        val leftPageIndex = if (isLandscape) currentPageItem * 2 else currentPageItem
-        val rightPageIndex = leftPageIndex + 1
-
-        // Group le linee per pagina left/right
-        val leftLines = linesToHighlight.filter { it.internalPageIndex == leftPageIndex }
-        val rightLines = linesToHighlight.filter { it.internalPageIndex == rightPageIndex }
-
-        Log.d("Highlight", "Evidenziando linee da $startIndex a $endIndex (left: ${leftLines.size}, right: ${rightLines.size})")  // MODIFICA: Debug log
-
-        if (holder is PdfPageViewHolder) {
-            val pdfMatrix = holder.transformMatrix // Matrix calcolata sulla pagina SX, assumiamo uguale per DX (stesso zoom)
-            if (pdfMatrix != null) {
-                val androidMatrix = android.graphics.Matrix()
-                androidMatrix.setScale(pdfMatrix.a, pdfMatrix.d)
-
-                // Evidenzia left
-                val leftRects = leftLines.map { line ->
-                    val mappedRect = RectF()
-                    androidMatrix.mapRect(mappedRect, line.area)
-                    mappedRect
+    private fun highlightCurrentRange() {
+        val pos = viewPager.currentItem
+        val holder = (viewPager.getChildAt(0) as? RecyclerView)?.findViewHolderForAdapterPosition(pos) as? PdfPageViewHolder ?: return
+        val allSentences = pageSentences[pos] ?: return
+        
+        if (currentHighlightBlockIndex < 0 || currentHighlightBlockIndex >= allSentences.size) return
+        
+        val sentence = allSentences[currentHighlightBlockIndex]
+        
+        holder.transformMatrix?.let { m ->
+            val am = android.graphics.Matrix()
+            am.setValues(floatArrayOf(m.a, m.c, m.e, m.b, m.d, m.f, 0f, 0f, 1f))
+            
+            val highlightedRects = mutableListOf<RectF>()
+            
+            if (currentHighlightStart >= 0 && currentHighlightEnd > currentHighlightStart) {
+                for (i in currentHighlightStart until currentHighlightEnd.coerceAtMost(sentence.charRects.size)) {
+                    val r = RectF()
+                    am.mapRect(r, sentence.charRects[i])
+                    highlightedRects.add(r)
                 }
-                holder.highlightView.setHighlight(leftRects)
-
-                // Evidenzia right (se landscape)
-                val rightRects = rightLines.map { line ->
-                    val mappedRect = RectF()
-                    androidMatrix.mapRect(mappedRect, line.area)
-                    mappedRect
-                }
-                holder.highlightViewRight?.setHighlight(rightRects)
-
-                // Scrolla alla prima linea (opzionale, solo su left per semplicità)
-                if (leftRects.isNotEmpty()) {
-                    holder.zoomLayout.scrollToRect(leftRects.first())
-                } else if (rightRects.isNotEmpty()) {
-                    holder.zoomLayout.scrollToRect(rightRects.first())
-                }
-            }
-        } else if (holder is TextPageViewHolder) {
-            // Per left
-            if (leftLines.isNotEmpty()) {
-                val textView = holder.textView
-                val plainText = textView.text.toString()
-                val spannable = SpannableString(plainText)
-
-                val minStart = leftLines.minOf { it.area.left.toInt().coerceIn(0, plainText.length) }
-                val maxEnd = leftLines.maxOf { it.area.right.toInt().coerceIn(0, plainText.length) }
-                if (minStart < maxEnd) {
-                    spannable.setSpan(BackgroundColorSpan(highlightColor), minStart, maxEnd, SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-                textView.text = spannable
-
-                // Scrolla alla prima linea
-                val scrollView = holder.leftScroll
-                val lineHeight = textView.lineHeight
-                val layout = textView.layout
-                if (layout != null) {
-                    val line = layout.getLineForOffset(minStart)
-                    val top = layout.getLineTop(line)
-                    scrollView.scrollTo(0, top)
-                }
+            } else {
+                val r = RectF()
+                am.mapRect(r, sentence.lineBbox)
+                highlightedRects.add(r)
             }
 
-            // Per right (se landscape)
-            if (rightLines.isNotEmpty() && isLandscape) {
-                val textView = holder.textViewRight ?: return
-                val plainText = textView.text.toString()
-                val spannable = SpannableString(plainText)
-
-                val minStart = rightLines.minOf { it.area.left.toInt().coerceIn(0, plainText.length) }
-                val maxEnd = rightLines.maxOf { it.area.right.toInt().coerceIn(0, plainText.length) }
-                if (minStart < maxEnd) {
-                    spannable.setSpan(BackgroundColorSpan(highlightColor), minStart, maxEnd, SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-                textView.text = spannable
-
-                // Scrolla alla prima linea
-                val scrollView = holder.rightScroll
-                val lineHeight = textView.lineHeight
-                val layout = textView.layout
-                if (layout != null) {
-                    val line = layout.getLineForOffset(minStart)
-                    val top = layout.getLineTop(line)
-                    scrollView.scrollTo(0, top)
+            if (highlightedRects.isNotEmpty()) {
+                val firstRect = highlightedRects.first()
+                if (sentence.internalPageIndex == (if (isDualPage) pos * 2 else pos)) {
+                    holder.highlightView.setHighlight(highlightedRects)
+                    holder.highlightViewRight.clearHighlight()
+                    if (holder.zoomLayout.isZoomed()) holder.zoomLayout.scrollToRect(firstRect)
+                } else {
+                    holder.highlightViewRight.setHighlight(highlightedRects)
+                    holder.highlightView.clearHighlight()
+                    val offsetRect = RectF(firstRect)
+                    val sepWidth = if (holder.separator.width > 0) holder.separator.width else 0
+                    offsetRect.offset(holder.leftContainer.width.toFloat() + sepWidth.toFloat(), 0f)
+                    if (holder.zoomLayout.isZoomed()) holder.zoomLayout.scrollToRect(offsetRect)
                 }
             }
         }
     }
 
     private fun clearAllHighlights() {
-        val currentPage = viewPager.currentItem
-        val holder = getViewHolder(currentPage) ?: return
-
-        if (holder is PdfPageViewHolder) {
-            holder.highlightView.clearHighlight()
-            holder.highlightViewRight?.clearHighlight()  // MODIFICA: Assicura pulizia right
-        } else if (holder is TextPageViewHolder) {
-            holder.textView.text = holder.textView.text.toString()
-            holder.textViewRight?.text = holder.textViewRight?.text.toString()
-        }
-    }
-
-    private fun saveBookmark() {
-        val currentPageItem = viewPager.currentItem
-        val absolutePage = if (isLandscape) currentPageItem * 2 else currentPageItem
-        with(prefs.edit()) {
-            putInt("${bookId}_page", absolutePage)
-            putInt("${bookId}_sentence", 0)
-            apply()
-        }
-        Toast.makeText(this, getString(R.string.bookmark_saved, absolutePage + 1), Toast.LENGTH_SHORT).show()
-    }
-
-    private fun loadBookmark() {
-        val absolutePage = prefs.getInt("${bookId}_page", -1)
-        if (absolutePage != -1) {
-            val viewPagerItem = if (isLandscape) absolutePage / 2 else absolutePage
-            viewPager.setCurrentItem(viewPagerItem, true)
-            Toast.makeText(this, getString(R.string.bookmark_loaded, absolutePage + 1), Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, getString(R.string.no_bookmark_found), Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun saveReadingProgress(sentenceIndex: Int) {
-        val currentPageItem = viewPager.currentItem
-        val absolutePage = if (isLandscape) currentPageItem * 2 else currentPageItem
-        with(prefs.edit()) {
-            putInt("${bookId}_page", absolutePage)
-            putInt("${bookId}_sentence", sentenceIndex)
-            apply()
-        }
-    }
-
-    private fun loadLastPosition() {
-        val absolutePage = prefs.getInt("${bookId}_page", 0)
-        val viewPagerItem = if (isLandscape) absolutePage / 2 else absolutePage
-        viewPager.setCurrentItem(viewPagerItem, false)
-        lifecycleScope.launch { extractTextFromPage(viewPagerItem) }
+        val holder = (viewPager.getChildAt(0) as? RecyclerView)?.findViewHolderForAdapterPosition(viewPager.currentItem) as? PdfPageViewHolder ?: return
+        holder.highlightView.clearHighlight()
+        holder.highlightViewRight.clearHighlight()
     }
 
     private fun toggleReading() {
-        if (!isBound) return
-        if (readingService?.isReading() == true) {
-            readingService?.stopReading()
-            fabReadAloud.setImageResource(android.R.drawable.ic_lock_silent_mode_off)
-        } else {
-            lifecycleScope.launch {
+        if (readingService?.isReading() == true) readingService?.stopReading()
+        else { 
+            lifecycleScope.launch { 
                 extractTextFromPage(viewPager.currentItem)
-                applySettingsToService()
-                readingService?.startReading()
-                fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
-            }
+                startReadingWithPotentialTranslation(viewPager.currentItem, 0)
+            } 
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isBound) {
-            unbindService(connection)
-            isBound = false
-        }
-        document?.destroy()
-        hideHandler.removeCallbacks(hideRunnable)
     }
 
     private fun applyTheme() {
-        val settingsPrefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
         val theme = settingsPrefs.getString("reader_theme", "Giorno (Bianco)")
-        val color = when (theme) {
-            "Pergamena" -> Color.parseColor("#D2B48C")
+        val bgColor = when (theme) {
             "Notte (Nero)" -> Color.BLACK
+            "Pergamena" -> Color.parseColor("#F4ECD8")
             else -> Color.WHITE
         }
-        val textColor = if (theme == "Notte (Nero)") Color.WHITE else Color.BLACK
-
-        findViewById<View>(R.id.readerRoot).setBackgroundColor(color)
-        toolbar.setBackgroundColor(color)
-        toolbar.setTitleTextColor(textColor)
-        toolbar.menu.clear()
-        findViewById<ImageButton>(R.id.btnSaveBookmark).setColorFilter(textColor)
-        findViewById<ImageButton>(R.id.btnLoadBookmark).setColorFilter(textColor)
-        findViewById<ImageButton>(R.id.btnSettingsOverlay).setColorFilter(textColor)
-        btnChapters.setColorFilter(textColor)
-        tvPageCount.setTextColor(textColor)
-    }
-
-    private fun applySettingsToService() {
-        val settingsPrefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-        val speed = settingsPrefs.getFloat("tts_speed", 1.0f)
-        val lang = settingsPrefs.getString("tts_lang", "Italiano")
-        val voiceName = settingsPrefs.getString("tts_voice_name", null)
-        readingService?.updateSettings(speed, lang ?: "Italiano", voiceName)
+        findViewById<View>(R.id.readerRoot).setBackgroundColor(bgColor)
+        tvPageCount.setTextColor(Color.parseColor("#FFD700"))
     }
 
     inner class PdfPagerAdapter(private val doc: Document) : RecyclerView.Adapter<PdfPageViewHolder>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PdfPageViewHolder {
-            val inflater = LayoutInflater.from(parent.context)
-            val view = inflater.inflate(R.layout.item_pdf_page, parent, false)
-            return PdfPageViewHolder(view)
-        }
-
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = PdfPageViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.item_pdf_page, parent, false))
         @SuppressLint("ClickableViewAccessibility")
         override fun onBindViewHolder(holder: PdfPageViewHolder, position: Int) {
-            holder.itemView.tag = "page_$position"
-            val context = holder.itemView.context
-            val settingsPrefs = context.getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
             val theme = settingsPrefs.getString("reader_theme", "Giorno (Bianco)")
-            val isNightMode = theme == "Notte (Nero)"
+            val bgColor = when (theme) {
+                "Notte (Nero)" -> Color.BLACK
+                "Pergamena" -> Color.parseColor("#F4ECD8")
+                else -> Color.WHITE
+            }
+            holder.zoomLayout.setBackgroundColor(bgColor)
 
-            if (isLandscape) {
-                holder.separator.visibility = View.VISIBLE
-                holder.rightContainer.visibility = View.VISIBLE
-            } else {
-                holder.separator.visibility = View.GONE
-                holder.rightContainer.visibility = View.GONE
+            holder.zoomLayout.doOnLayout {
+                val p1 = if (isDualPage) position * 2 else position
+                renderPdfPage(doc, p1, holder.imageView, holder.highlightView, holder.leftContainer.width.toFloat(), holder.leftContainer.height.toFloat(), holder)
+                if (isDualPage && p1 + 1 < doc.countPages()) {
+                    holder.rightContainer.visibility = View.VISIBLE; holder.separator.visibility = View.VISIBLE
+                    renderPdfPage(doc, p1 + 1, holder.imageViewRight, holder.highlightViewRight, holder.leftContainer.width.toFloat(), holder.leftContainer.height.toFloat(), null)
+                } else { holder.rightContainer.visibility = View.GONE; holder.separator.visibility = View.GONE }
             }
 
-            holder.zoomLayout.doOnLayout { zoomLayout ->
-                val containerWidth = holder.leftContainer.width
-                val containerHeight = holder.leftContainer.height
-
-                val p1Index = if (isLandscape) position * 2 else position
-                renderPdfPage(doc, p1Index, holder.imageView, holder.highlightView, containerWidth, containerHeight, isNightMode, holder)
-
-                if (isLandscape) {
-                    val p2Index = p1Index + 1
-                    if (p2Index < doc.countPages()) {
-                        renderPdfPage(doc, p2Index, holder.imageViewRight!!, holder.highlightViewRight!!, containerWidth, containerHeight, isNightMode, null)
-                    } else {
-                        holder.imageViewRight?.setImageBitmap(null)
-                        holder.highlightViewRight?.clearHighlight()
-                    }
+            when (theme) {
+                "Notte (Nero)" -> {
+                    val matrix = ColorMatrix(floatArrayOf(
+                        -1f, 0f, 0f, 0f, 255f,
+                        0f, -1f, 0f, 0f, 255f,
+                        0f, 0f, -1f, 0f, 255f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    val filter = ColorMatrixColorFilter(matrix)
+                    holder.imageView.colorFilter = filter
+                    holder.imageViewRight.colorFilter = filter
+                }
+                "Pergamena" -> {
+                    val matrix = ColorMatrix()
+                    matrix.setSaturation(0f)
+                    val sepiaMatrix = ColorMatrix()
+                    sepiaMatrix.setScale(1f, 0.9f, 0.75f, 1f)
+                    matrix.postConcat(sepiaMatrix)
+                    val filter = ColorMatrixColorFilter(matrix)
+                    holder.imageView.colorFilter = filter
+                    holder.imageViewRight.colorFilter = filter
+                }
+                else -> {
+                    holder.imageView.colorFilter = null
+                    holder.imageViewRight.colorFilter = null
                 }
             }
 
-            // GestureDetector migliorato e uniformato
-            val gestureDetector = GestureDetector(holder.itemView.context, object : GestureDetector.SimpleOnGestureListener() {
-
-                override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    Log.d("Gesture", "Single tap detected")
-                    val pdfMatrix = holder.transformMatrix ?: return false
-                    val androidMatrix = android.graphics.Matrix()
-                    androidMatrix.setScale(pdfMatrix.a, pdfMatrix.d)
-                    val invertedMatrix = android.graphics.Matrix()
-
-                    if (!androidMatrix.invert(invertedMatrix)) return false
-
-                    val touchX = e.x
-                    val touchY = e.y
-
-                    val zoomWidth = holder.zoomLayout.width
-                    val pageSeparatorX = zoomWidth / 2f
-
-                    var targetPageIndex = if (isLandscape) position * 2 else position
-                    var relativeX = touchX
-                    var relativeY = touchY
-
-                    if (isLandscape && touchX > pageSeparatorX) {
-                        targetPageIndex += 1
-                        relativeX -= pageSeparatorX
-                    }
-
-                    val contentPoint = holder.zoomLayout.toChildPoint(relativeX, relativeY)
-                    val leftWidth = holder.leftContainer.width
-
-                    var finalX = contentPoint[0]
-                    var finalY = contentPoint[1]
-                    var detectedPage = targetPageIndex
-
-                    if (isLandscape && finalX > leftWidth) {
-                        detectedPage += 1
-                        finalX -= (leftWidth + holder.separator.width.toFloat())
-                    }
-
-                    val pdfPts = floatArrayOf(finalX, finalY)
-                    invertedMatrix.mapPoints(pdfPts)
-                    val pdfX = pdfPts[0]
-                    val pdfY = pdfPts[1]
-
-                    val sentences = pageSentences[position]
-                    var clickedIndex = -1
-                    sentences?.forEachIndexed { idx, s ->
-                        if (s.internalPageIndex == detectedPage && s.area.contains(pdfX, pdfY)) {
-                            clickedIndex = idx
-                            return@forEachIndexed
-                        }
-                    }
-
-                    if (clickedIndex != -1) {
-                        readingService?.startReadingFrom(clickedIndex)
-                        fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
-                        clearAllHighlights()
-                        highlightLines(clickedIndex, 5)  // MODIFICA: Evidenzia 5 linee anche su tap
-                        Handler(Looper.getMainLooper()).postDelayed({ clearAllHighlights() }, 500)  // Evidenziazione temporanea per tap
-                        return true
-                    } else {
-                        toggleBars()
-                        delayedHide(5000)
-                        return false
-                    }
-                }
-
+            val gd = GestureDetector(this@PdfReaderActivity, object : GestureDetector.SimpleOnGestureListener() {
                 override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                    if (e1 == null) return false
-                    val diffX = e2.x - e1.x
-                    val diffY = e2.y - e1.y
-                    val SWIPE_THRESHOLD = 50
-                    val SWIPE_VELOCITY_THRESHOLD = 50
-
-                    if (abs(diffY) > SWIPE_THRESHOLD && abs(velocityY) > SWIPE_VELOCITY_THRESHOLD && abs(diffX) < abs(diffY)) {
-                        // Swipe verticale: toggle bars (menu esistente)
-                        toggleBars()
-                        delayedHide(5000)
-                        Log.d("Gesture", "Vertical swipe detected")
+                    if (e1 != null && e2 != null && e1.y - e2.y > 80) {
+                        showBars()
                         return true
                     }
-                    // Swipe orizzontale: gestito da ViewPager per cambiare pagina
                     return false
                 }
-            })
-
-            holder.zoomLayout.setOnTouchListener { _, event ->
-                val handled = gestureDetector.onTouchEvent(event)
-                if (!handled) holder.zoomLayout.onTouchEvent(event)
-                true
-            }
-        }
-
-        private fun renderPdfPage(doc: Document, index: Int, imageView: ImageView, highlightView: HighlightView, w: Int, h: Int, isNight: Boolean, holder: PdfPageViewHolder?) {
-            try {
-                val page = doc.loadPage(index)
-                val pageSize = page.bounds
-                val scale = minOf(w.toFloat() / (pageSize.x1 - pageSize.x0), h.toFloat() / (pageSize.y1 - pageSize.y0))
-                val renderMatrix = Matrix(scale, scale)
-
-                if (holder != null) holder.transformMatrix = renderMatrix
-
-                val pixmap = page.toPixmap(renderMatrix, com.artifex.mupdf.fitz.ColorSpace.DeviceRGB, true)
-                val width = pixmap.width
-                val height = pixmap.height
-
-                val samples = pixmap.samples
-                val pixels = IntArray(width * height)
-
-                for (i in 0 until width * height) {
-                    var r = samples[i * 4].toInt() and 0xff
-                    var g = samples[i * 4 + 1].toInt() and 0xff
-                    var b = samples[i * 4 + 2].toInt() and 0xff
-                    var a = samples[i * 4 + 3].toInt() and 0xff
-
-                    if (isNight) {
-                        r = 255 - r
-                        g = 255 - g
-                        b = 255 - b
-                    } else {
-                        if (r > 240 && g > 240 && b > 240) a = 0
-                    }
-                    pixels[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    if (areBarsVisible) hideBars() else showBars()
+                    return true
                 }
-
-                val bitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
-
-                imageView.scaleType = ImageView.ScaleType.FIT_XY
-                imageView.setImageBitmap(bitmap)
-
-                page.destroy()
-                pixmap.destroy()
-            } catch (e: Exception) { Log.e("PdfRender", "Error page $index", e) }
+                override fun onLongPress(e: MotionEvent) {
+                    handlePdfLongPress()
+                }
+            })
+            holder.zoomLayout.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
+            
+            // Gestione Vista Tradotta
+            handleTranslationView(holder, position)
         }
+        override fun getItemCount() = if (isDualPage) (doc.countPages() + 1) / 2 else doc.countPages()
+    }
+    
+    private fun handleTranslationView(holder: PdfPageViewHolder, position: Int) {
+        val context = holder.itemView.context
+        
+        // Rimuovi eventuali viste di traduzione precedenti se presenti
+        holder.leftContainer.findViewWithTag<View>("trans_view")?.let { holder.leftContainer.removeView(it) }
+        holder.rightContainer.findViewWithTag<View>("trans_view")?.let { holder.rightContainer.removeView(it) }
 
-        override fun getItemCount(): Int {
-            val count = doc.countPages()
-            return if (isLandscape) (count + 1) / 2 else count
+        if (isTranslationEnabled) {
+            // Nascondi immagini originali
+            holder.imageView.visibility = View.INVISIBLE
+            holder.imageViewRight.visibility = View.INVISIBLE
+            
+            // Crea e aggiungi vista testo tradotto per pagina sinistra
+            addTranslatedTextToContainer(context, holder.leftContainer, if (isDualPage) position * 2 else position)
+            
+            // Se doppia pagina, fai lo stesso per destra
+            if (isDualPage && (position * 2 + 1) < (document?.countPages() ?: 0)) {
+                addTranslatedTextToContainer(context, holder.rightContainer, position * 2 + 1)
+            }
+        } else {
+            // Ripristina visibilità
+            holder.imageView.visibility = View.VISIBLE
+            holder.imageViewRight.visibility = View.VISIBLE
         }
     }
 
-    inner class TextPagerAdapter(private val pages: List<String>) : RecyclerView.Adapter<TextPageViewHolder>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TextPageViewHolder {
-            val inflater = LayoutInflater.from(parent.context)
-            val view = inflater.inflate(R.layout.item_text_page, parent, false)
-            return TextPageViewHolder(view)
+    private fun addTranslatedTextToContainer(context: Context, container: FrameLayout, pageIndex: Int) {
+        val scrollView = ScrollView(context).apply {
+            tag = "trans_view"
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            isFillViewport = true
+            setBackgroundColor(if (settingsPrefs.getString("reader_theme", "") == "Notte (Nero)") Color.BLACK else Color.WHITE)
         }
-
-        @SuppressLint("ClickableViewAccessibility")
-        override fun onBindViewHolder(holder: TextPageViewHolder, position: Int) {
-            val settings = holder.itemView.context.getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-            val textSize = settings.getInt("text_size", 18).toFloat()
-            val theme = settings.getString("reader_theme", "Giorno (Bianco)")
-
-            val (textColor, bgColor) = when (theme) {
-                "Pergamena" -> Color.BLACK to Color.parseColor("#D2B48C")
-                "Notte (Nero)" -> Color.WHITE to Color.BLACK
-                else -> Color.BLACK to Color.WHITE
-            }
-            holder.itemView.setBackgroundColor(bgColor)
-
-            if (isLandscape) {
-                holder.separator.visibility = View.VISIBLE
-                holder.rightScroll.visibility = View.VISIBLE
-            } else {
-                holder.separator.visibility = View.GONE
-                holder.rightScroll.visibility = View.GONE
-            }
-
-            val p1Index = if (isLandscape) position * 2 else position
-            holder.textView.text = pages.getOrNull(p1Index) ?: ""
-            holder.textView.textSize = textSize
-            holder.textView.setTextColor(textColor)
-            holder.textView.setBackgroundColor(bgColor)
-
-            if (isLandscape) {
-                val p2Index = p1Index + 1
-                holder.textViewRight?.text = pages.getOrNull(p2Index) ?: ""
-                holder.textViewRight?.textSize = textSize
-                holder.textViewRight?.setTextColor(textColor)
-                holder.textViewRight?.setBackgroundColor(bgColor)
-            }
-
-            // GestureDetector uniformato a PDF, con selezione frase su tap
-            val gestureDetector = GestureDetector(holder.itemView.context, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onSingleTapUp(e: MotionEvent): Boolean {
-                    Log.d("Gesture", "Single tap detected on text")
-                    val touchX = e.x
-                    val touchY = e.y
-
-                    val pageSeparatorX = holder.itemView.width / 2f
-                    var detectedPage = if (isLandscape) position * 2 else position
-                    var isRightPage = false
-
-                    if (isLandscape && touchX > pageSeparatorX) {
-                        detectedPage += 1
-                        isRightPage = true
-                    }
-
-                    val textView = if (isRightPage) holder.textViewRight else holder.textView
-                    textView?.let {
-                        val offset = it.getOffsetForPosition(touchX - if (isRightPage) pageSeparatorX else 0f, touchY)
-                        val sentences = pageSentences[position]
-                        var clickedIndex = -1
-                        sentences?.forEachIndexed { idx, s ->
-                            if (s.internalPageIndex == detectedPage && offset >= s.area.left.toInt() && offset <= s.area.right.toInt()) {
-                                clickedIndex = idx
-                                return@forEachIndexed
-                            }
-                        }
-
-                        if (clickedIndex != -1) {
-                            readingService?.startReadingFrom(clickedIndex)
-                            fabReadAloud.setImageResource(android.R.drawable.ic_media_pause)
-                            clearAllHighlights()
-                            highlightLines(clickedIndex, 5)  // MODIFICA: Evidenzia 5 linee anche su tap
-                            Handler(Looper.getMainLooper()).postDelayed({ clearAllHighlights() }, 500)
-                            return true
-                        } else {
-                            toggleBars()
-                            delayedHide(5000)
-                            return false
-                        }
-                    }
-                    return false
-                }
-
-                override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                    if (e1 == null) return false
-                    val diffX = e2.x - e1.x
-                    val diffY = e2.y - e1.y
-                    val SWIPE_THRESHOLD = 50
-                    val SWIPE_VELOCITY_THRESHOLD = 50
-
-                    if (abs(diffY) > SWIPE_THRESHOLD && abs(velocityY) > SWIPE_VELOCITY_THRESHOLD && abs(diffX) < abs(diffY)) {
-                        // Swipe verticale: toggle bars (menu esistente)
-                        toggleBars()
-                        delayedHide(5000)
-                        Log.d("Gesture", "Vertical swipe detected on text")
-                        return true
-                    }
-                    // Swipe orizzontale: gestito da ViewPager per cambiare pagina
-                    return false
-                }
-            })
-
-            holder.itemView.setOnTouchListener { _, event ->
-                val handled = gestureDetector.onTouchEvent(event)
-                handled
-            }
+        
+        val textView = TextView(context).apply {
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
+            setPadding(32, 32, 32, 32)
+            textSize = 18f
+            setTextColor(if (settingsPrefs.getString("reader_theme", "") == "Notte (Nero)") Color.WHITE else Color.BLACK)
+            text = translatedPages[pageIndex] ?: "Caricamento traduzione..."
         }
-        override fun getItemCount(): Int {
-            val count = pages.size
-            return if (isLandscape) (count + 1) / 2 else count
+        
+        scrollView.addView(textView)
+        container.addView(scrollView)
+
+        if (!translatedPages.containsKey(pageIndex)) {
+            // Estrai testo e traduci
+            lifecycleScope.launch(Dispatchers.IO) {
+                val extractedText = extractTextString(pageIndex)
+                withContext(Dispatchers.Main) {
+                    if (extractedText.isBlank()) {
+                        textView.text = "[Nessun testo rilevato in questa pagina]"
+                    } else {
+                        TranslationHelper.translate(extractedText, null, targetLangCode, { res ->
+                            translatedPages[pageIndex] = res
+                            textView.text = res
+                        }, {
+                            textView.text = "Errore traduzione."
+                        })
+                    }
+                }
+            }
         }
     }
 
-    inner class PdfPageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val zoomLayout: ZoomLayout = itemView.findViewById(R.id.zoomLayout)
-        val leftContainer: FrameLayout = itemView.findViewById(R.id.leftPageContainer)
-        val imageView: ImageView = itemView.findViewById(R.id.pageImageView)
-        val highlightView: HighlightView = itemView.findViewById(R.id.highlightView)
+    private fun extractTextString(pageIndex: Int): String {
+        return try {
+            val page = document?.loadPage(pageIndex)
+            val text = page?.toStructuredText()
+            val sb = StringBuilder()
+            text?.blocks?.forEach { block ->
+                block.lines?.forEach { line ->
+                    line.chars?.forEach { char -> sb.append(char.c.toChar()) }
+                    sb.append("\n")
+                }
+                sb.append("\n")
+            }
+            text?.destroy()
+            page?.destroy()
+            sb.toString()
+        } catch (e: Exception) { "" }
+    }
 
-        val separator: View = itemView.findViewById(R.id.pageSeparator)
-        val rightContainer: FrameLayout = itemView.findViewById(R.id.rightPageContainer)
-        val imageViewRight: ImageView? = itemView.findViewById(R.id.pageImageViewRight)
-        val highlightViewRight: HighlightView? = itemView.findViewById(R.id.highlightViewRight)
+    private fun renderPdfPage(doc: Document, pageIdx: Int, iv: ImageView, hv: HighlightView, w: Float, h: Float, holder: PdfPageViewHolder?) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val page = doc.loadPage(pageIdx)
+            val bbox = page.bounds
+            val scale = minOf(w / (bbox.x1 - bbox.x0), h / (bbox.y1 - bbox.y0))
+            val matrix = Matrix(scale, 0f, 0f, scale, -bbox.x0 * scale, -bbox.y0 * scale)
+            val bitmap = Bitmap.createBitmap(((bbox.x1 - bbox.x0) * scale).toInt(), ((bbox.y1 - bbox.y0) * scale).toInt(), Bitmap.Config.ARGB_8888)
+            val dev = AndroidDrawDevice(bitmap, 0, 0, 0, 0, bitmap.width, bitmap.height); page.run(dev, matrix, null); dev.destroy()
+            withContext(Dispatchers.Main) { 
+                iv.setImageBitmap(bitmap)
+                if (holder != null) holder.transformMatrix = matrix 
+            }
+        }
+    }
+    
 
+    class PdfPageViewHolder(v: View) : RecyclerView.ViewHolder(v) {
+        val zoomLayout: com.example.leggo.ZoomLayout = v.findViewById(R.id.zoomLayout)
+        val leftContainer: FrameLayout = v.findViewById(R.id.leftPageContainer); val imageView: ImageView = v.findViewById(R.id.pageImageView); val highlightView: HighlightView = v.findViewById(R.id.highlightView); val separator: View = v.findViewById(R.id.pageSeparator)
+        val rightContainer: FrameLayout = v.findViewById(R.id.rightPageContainer); val imageViewRight: ImageView = v.findViewById(R.id.pageImageViewRight); val highlightViewRight: HighlightView = v.findViewById(R.id.highlightViewRight)
         var transformMatrix: Matrix? = null
-    }
-
-    inner class TextPageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val textView: TextView = itemView.findViewById(R.id.pageTextView)
-        val leftScroll: NestedScrollView = itemView.findViewById(R.id.leftPageScroll)
-
-        val separator: View = itemView.findViewById(R.id.pageSeparator)
-        val rightScroll: NestedScrollView = itemView.findViewById(R.id.rightPageScroll)
-        val textViewRight: TextView? = itemView.findViewById(R.id.pageTextViewRight)
-
-        val itemViewAsScrollView: NestedScrollView get() = leftScroll
     }
 }

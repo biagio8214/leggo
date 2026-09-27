@@ -11,6 +11,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.leggo.models.Book
 import kotlinx.coroutines.launch
 
 class TrashActivity : BaseActivity() {
@@ -45,7 +46,7 @@ class TrashActivity : BaseActivity() {
         }
     }
 
-    private fun handleBookAction(book: BookUtils.Book, action: String) {
+    private fun handleBookAction(book: Book, action: String) {
         when (action) {
             "RESTORE" -> {
                 lifecycleScope.launch {
@@ -60,7 +61,7 @@ class TrashActivity : BaseActivity() {
         }
     }
     
-    private fun showDeleteConfirmation(book: BookUtils.Book) {
+    private fun showDeleteConfirmation(book: Book) {
         AlertDialog.Builder(this)
             .setTitle("Elimina Definitivamente")
             .setMessage("Sei sicuro di voler eliminare definitivamente '${book.title}'? L\'azione non è reversibile.")
@@ -76,7 +77,7 @@ class TrashActivity : BaseActivity() {
     }
 }
 
-class TrashAdapter(private var books: List<BookUtils.Book>, private val onAction: (BookUtils.Book, String) -> Unit) : RecyclerView.Adapter<TrashAdapter.ViewHolder>() {
+class TrashAdapter(private var books: List<Book>, private val onAction: (Book, String) -> Unit) : RecyclerView.Adapter<TrashAdapter.ViewHolder>() {
     
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tvTitle: TextView = itemView.findViewById(R.id.tvTrashTitle)
@@ -98,7 +99,7 @@ class TrashAdapter(private var books: List<BookUtils.Book>, private val onAction
 
     override fun getItemCount() = books.size
     
-    fun updateBooks(newBooks: List<BookUtils.Book>) {
+    fun updateBooks(newBooks: List<Book>) {
         this.books = newBooks
         notifyDataSetChanged()
     }

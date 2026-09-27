@@ -62,5 +62,13 @@
     <!-- Search -->
     <string name="source_gutendex">Project Gutenberg (Gutendex)</string>
     <string name="source_google">Google Books (Gratis)</string>
-    
+
+    <!-- Book Details Dialog -->
+    <string name="book_details_authors_prefix">Autori: %s</string>
+    <string name="book_details_unknown_author">Autore sconosciuto</string>
+    <string name="book_details_format_prefix">Formato: %s</string>
+    <string name="book_details_unknown_format">Sconosciuto</string>
+    <string name="book_details_no_description">Nessuna descrizione disponibile.</string>
+    <string name="download">Scarica</string>
+
 </resources>

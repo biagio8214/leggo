@@ -1,12 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:id="@+id/menu_trash"
-        android:title="Cestino" />
+        android:id="@+id/nav_library"
+        android:icon="@android:drawable/ic_menu_agenda"
+        android:title="@string/library" />
     <item
-        android:id="@+id/menu_copyright"
-        android:title="Copyright" />
+        android:id="@+id/nav_settings"
+        android:icon="@android:drawable/ic_menu_preferences"
+        android:title="@string/settings" />
     <item
-        android:id="@+id/menu_thanks"
-        android:title="Ringraziamenti" />
+        android:id="@+id/nav_trash"
+        android:icon="@android:drawable/ic_menu_delete"
+        android:title="@string/trash" />
+    <item
+        android:id="@+id/nav_credits"
+        android:icon="@android:drawable/ic_menu_info_details"
+        android:title="@string/copyright" />
+    <item
+        android:id="@+id/nav_thanks"
+        android:icon="@android:drawable/btn_star"
+        android:title="@string/thanks" />
 </menu>

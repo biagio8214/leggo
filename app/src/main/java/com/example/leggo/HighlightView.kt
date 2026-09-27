@@ -2,38 +2,48 @@ package com.example.leggo
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 
 class HighlightView @JvmOverloads constructor(
-    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    private val highlightPaint = Paint().apply {
-        color = Color.parseColor("#80B2EBF2") // Celeste semi-trasparente
+    private val highlights = mutableListOf<RectF>()
+    private val paint = Paint().apply {
+        color = 0x8000FFFF.toInt() // Semi-transparent cyan/celeste
         style = Paint.Style.FILL
     }
 
-    private var highlightRects: List<RectF> = emptyList()
+    fun setHighlight(rects: List<RectF>) {
+        highlights.clear()
+        highlights.addAll(rects)
+        invalidate()
+    }
 
-    fun setHighlight(rects: List<RectF>?) {
-        this.highlightRects = rects ?: emptyList()
-        postInvalidate() // Ridisegna la view in modo sicuro dal background thread
+    fun addHighlight(rect: RectF) {
+        highlights.add(rect)
+        invalidate()
     }
 
     fun clearHighlight() {
-        this.highlightRects = emptyList()
-        postInvalidate()
+        highlights.clear()
+        invalidate()
+    }
+
+    fun clearHighlights() {
+        highlights.clear()
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // L'origine (0,0) del canvas è in alto a sinistra della view
-        highlightRects.forEach { rect ->
-            canvas.drawRect(rect, highlightPaint)
+        for (rect in highlights) {
+            canvas.drawRect(rect, paint)
         }
     }
 }

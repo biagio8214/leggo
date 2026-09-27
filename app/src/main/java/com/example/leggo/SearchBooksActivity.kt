@@ -1,27 +1,26 @@
 package com.example.leggo
 
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Color
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ImageView
-import android.widget.ProgressBar
-import android.widget.TextView
+import android.widget.*
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
-import com.google.gson.annotations.SerializedName
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.GET
-import retrofit2.http.Query
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 
 class SearchBooksActivity : BaseActivity() {
@@ -32,55 +31,10 @@ class SearchBooksActivity : BaseActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var tvNoResults: TextView
 
-    // Generic model for search results
-    data class BookItem(
-        val title: String,
-        val authors: String,
-        val coverUrl: String?,
-        val downloadUrl: String?,
-        val language: String?,
-        val description: String? = null
-    )
-
-    // Gutendex API
-    interface GutendexApi {
-        @GET("books")
-        fun searchBooks(@Query("search") query: String, @Query("languages") languages: String?): Call<GutendexResponse>
-    }
-    
-    data class GutendexResponse(val count: Int, val results: List<GutendexBook>)
-    data class GutendexBook(
-        val id: Int, val title: String, val authors: List<GutenAuthor>,
-        val languages: List<String>, val formats: Map<String, String>,
-        @SerializedName("download_count") val downloadCount: Int
-    )
-    data class GutenAuthor(val name: String)
-
-    // Google Books API
-    interface GoogleBooksApi {
-        @GET("books/v1/volumes")
-        fun searchBooks(
-            @Query("q") query: String,
-            @Query("filter") filter: String = "free-ebooks",
-            @Query("printType") printType: String = "books",
-            @Query("langRestrict") langRestrict: String? = null
-        ): Call<GoogleBooksResponse>
-    }
-
-    data class GoogleBooksResponse(val items: List<GoogleBook>?)
-    data class GoogleBook(val volumeInfo: GoogleVolumeInfo, val accessInfo: GoogleAccessInfo)
-    data class GoogleVolumeInfo(
-        val title: String, val authors: List<String>?, val imageLinks: GoogleImageLinks?,
-        val language: String?
-    )
-    data class GoogleImageLinks(val thumbnail: String?, val smallThumbnail: String?)
-    data class GoogleAccessInfo(val epub: GoogleAccessLink?, val pdf: GoogleAccessLink?)
-    data class GoogleAccessLink(val isAvailable: Boolean, val downloadLink: String?)
-
-
     private var bookAdapter: BookAdapter? = null
-    private val allBooks = mutableListOf<BookItem>()
+    private val allBooks = mutableListOf<BookSearchManager.BookResult>()
     private val pendingRequests = AtomicInteger(0)
+    private var downloadId: Long = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,9 +58,14 @@ class SearchBooksActivity : BaseActivity() {
 
         btnSearch.setOnClickListener {
             val query = etQuery.text.toString()
-            if (query.isNotBlank()) {
-                performSearch(query)
-            }
+            if (query.isNotBlank()) performSearch(query)
+        }
+        
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(onDownloadComplete, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(onDownloadComplete, filter)
         }
     }
     
@@ -114,164 +73,140 @@ class SearchBooksActivity : BaseActivity() {
         progressBar.visibility = View.VISIBLE
         recycler.visibility = View.GONE
         tvNoResults.visibility = View.GONE
-        
         allBooks.clear()
         bookAdapter?.notifyDataSetChanged()
         
-        val prefs = getSharedPreferences("LeggoSettings", Context.MODE_PRIVATE)
-        val appLang = prefs.getString("app_lang", "it")
-        val searchLang = if (appLang == "it") "it" else "en"
-
-        pendingRequests.set(2) 
-        searchGutendex(query, searchLang)
-        searchGoogleBooks(query, searchLang)
-    }
-    
-    private fun searchGutendex(query: String, lang: String) {
-        val retrofit = Retrofit.Builder().baseUrl("https://gutendex.com/").addConverterFactory(GsonConverterFactory.create()).build()
-        val api = retrofit.create(GutendexApi::class.java)
-        
-        api.searchBooks(query, lang).enqueue(object : Callback<GutendexResponse> {
-            override fun onResponse(call: Call<GutendexResponse>, response: Response<GutendexResponse>) {
-                if (response.isSuccessful && response.body() != null) {
-                    val rawBooks = response.body()!!.results
-                    val bookItems = rawBooks.map { book ->
-                        var pdfUrl: String? = null
-                        var epubUrl: String? = null
-                        var htmlUrl: String? = null
-                        for ((key, value) in book.formats) {
-                            if (key.contains("application/pdf")) pdfUrl = value
-                            if (key.contains("application/epub+zip")) epubUrl = value
-                            if (key.contains("text/html")) htmlUrl = value
-                        }
-                        val downloadUrl = pdfUrl ?: epubUrl ?: htmlUrl
-                        
-                        BookItem(
-                            title = book.title,
-                            authors = book.authors.joinToString(", ") { it.name },
-                            coverUrl = book.formats.entries.find { it.key.contains("image/jpeg") }?.value,
-                            downloadUrl = downloadUrl,
-                            language = book.languages.firstOrNull(),
-                            description = "Download: ${book.downloadCount}"
-                        )
-                    }
-                    addResults(bookItems)
-                }
-                checkProgress()
-            }
-
-            override fun onFailure(call: Call<GutendexResponse>, t: Throwable) {
-                checkProgress()
-            }
-        })
-    }
-
-    private fun searchGoogleBooks(query: String, lang: String) {
-        val retrofit = Retrofit.Builder().baseUrl("https://www.googleapis.com/").addConverterFactory(GsonConverterFactory.create()).build()
-        val api = retrofit.create(GoogleBooksApi::class.java)
-        
-        api.searchBooks(query, langRestrict = lang).enqueue(object : Callback<GoogleBooksResponse> {
-            override fun onResponse(call: Call<GoogleBooksResponse>, response: Response<GoogleBooksResponse>) {
-                if (response.isSuccessful) {
-                    val rawBooks = response.body()?.items ?: emptyList()
-                    val bookItems = rawBooks.map { book ->
-                        val info = book.volumeInfo
-                        val access = book.accessInfo
-                        val downloadUrl = if (access.epub?.isAvailable == true && !access.epub.downloadLink.isNullOrBlank()) {
-                            access.epub.downloadLink
-                        } else if (access.pdf?.isAvailable == true && !access.pdf.downloadLink.isNullOrBlank()) {
-                            access.pdf.downloadLink
-                        } else {
-                            null
-                        }
-                        
-                        val coverUrl = info.imageLinks?.thumbnail?.replace("http://", "https://")
-
-                        BookItem(
-                            title = info.title,
-                            authors = info.authors?.joinToString(", ") ?: getString(R.string.author_unknown),
-                            coverUrl = coverUrl,
-                            downloadUrl = downloadUrl,
-                            language = info.language,
-                            description = null
-                        )
-                    }
-                    addResults(bookItems)
-                }
-                checkProgress()
-            }
-             override fun onFailure(call: Call<GoogleBooksResponse>, t: Throwable) {
-                checkProgress()
-            }
-        })
+        pendingRequests.set(1) 
+        lifecycleScope.launch {
+            val results = BookSearchManager.searchLegalBooks(query)
+            addResults(results)
+            checkProgress()
+        }
     }
     
     @Synchronized
-    private fun addResults(newBooks: List<BookItem>) {
-        if (newBooks.isNotEmpty()) {
-            val startPos = allBooks.size
-            allBooks.addAll(newBooks)
-            bookAdapter?.notifyItemRangeInserted(startPos, newBooks.size)
-        }
+    private fun addResults(newBooks: List<BookSearchManager.BookResult>) {
+        val startPos = allBooks.size
+        allBooks.addAll(newBooks)
+        runOnUiThread { bookAdapter?.notifyItemRangeInserted(startPos, newBooks.size) }
     }
     
     private fun checkProgress() {
-        if (pendingRequests.decrementAndGet() == 0) {
-            progressBar.visibility = View.GONE
-            if (allBooks.isEmpty()) {
-                tvNoResults.visibility = View.VISIBLE
-                recycler.visibility = View.GONE
-            } else {
-                tvNoResults.visibility = View.GONE
-                recycler.visibility = View.VISIBLE
+        if (pendingRequests.decrementAndGet() <= 0) {
+            runOnUiThread {
+                progressBar.visibility = View.GONE
+                if (allBooks.isEmpty()) tvNoResults.visibility = View.VISIBLE else recycler.visibility = View.VISIBLE
             }
         }
     }
     
-    inner class BookAdapter(private val books: List<BookItem>) : RecyclerView.Adapter<BookAdapter.BookViewHolder>() {
-        
-        inner class BookViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            val imgCover: ImageView = itemView.findViewById(R.id.imgBookCover)
-            val tvTitle: TextView = itemView.findViewById(R.id.tvBookTitle)
-            val tvAuthor: TextView = itemView.findViewById(R.id.tvBookAuthor)
-            val tvDesc: TextView = itemView.findViewById(R.id.tvBookDescription)
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): BookViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_book_search, parent, false)
-            return BookViewHolder(view)
-        }
-
-        override fun onBindViewHolder(holder: BookViewHolder, position: Int) {
-            val book = books[position]
-            holder.tvTitle.text = book.title
-            holder.tvAuthor.text = if (book.authors.isNotBlank()) book.authors else getString(R.string.author_unknown)
-            
-            if (book.description != null) {
-                holder.tvDesc.text = book.description
-                holder.tvDesc.visibility = View.VISIBLE
-            } else {
-                holder.tvDesc.visibility = View.GONE
+    private fun startDirectDownload(url: String, title: String, format: String?) {
+        try {
+            // Determina l'estensione corretta basandosi sul formato dichiarato o sull'URL
+            val extension = when {
+                format?.lowercase()?.contains("pdf") == true -> ".pdf"
+                format?.lowercase()?.contains("epub") == true -> ".epub"
+                url.lowercase().endsWith(".pdf") -> ".pdf"
+                else -> ".epub" // Default
             }
             
-            if (book.coverUrl != null) {
-                holder.imgCover.load(book.coverUrl) { crossfade(true).placeholder(R.drawable.leggo).error(R.drawable.leggo) }
-            } else {
-                holder.imgCover.setImageResource(R.drawable.leggo)
-            }
+            val sanitizedTitle = title.replace(Regex("[^a-zA-Z0-9]"), "_")
+            val fileName = "$sanitizedTitle$extension"
             
-            holder.itemView.setOnClickListener {
-                val intent = Intent(holder.itemView.context, BookDetailActivity::class.java).apply {
-                    putExtra("title", book.title)
-                    putExtra("author", book.authors)
-                    putExtra("cover_url", book.coverUrl)
-                    putExtra("download_url", book.downloadUrl)
-                    putExtra("language", book.language?.uppercase())
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle(title)
+                .setDescription("Scaricando con Leggo...")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .addRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            downloadId = dm.enqueue(request)
+            Toast.makeText(this, "Download avviato...", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Errore: impossibile avviare il download.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private val onDownloadComplete = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+            if (downloadId == id && id != -1L) {
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val query = DownloadManager.Query().setFilterById(id)
+                val cursor = dm.query(query)
+                if (cursor.moveToFirst()) {
+                    val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                    if (statusIndex != -1 && cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL) {
+                        val uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                        if (uriIndex != -1) {
+                            val uriString = cursor.getString(uriIndex)
+                            val titleIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                            val finalTitle = if (titleIndex != -1) cursor.getString(titleIndex) else "Libro"
+                            
+                            if (uriString != null) {
+                                val size = try {
+                                    contentResolver.openFileDescriptor(Uri.parse(uriString), "r")?.use { it.statSize } ?: 0
+                                } catch (e: Exception) { 0 }
+
+                                // Aumentato limite a 5KB per evitare di salvare pagine di errore HTML come libri
+                                if (size > 5000) {
+                                    Toast.makeText(context, "Libro pronto in Biblioteca!", Toast.LENGTH_SHORT).show()
+                                    lifecycleScope.launch {
+                                        BookUtils.addOrUpdateBook(context, Uri.parse(uriString), finalTitle)
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Errore: il sito ha inviato un file non valido.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    } else {
+                        Toast.makeText(context, "Download fallito. Riprova più tardi.", Toast.LENGTH_SHORT).show()
+                    }
                 }
-                holder.itemView.context.startActivity(intent)
+                cursor.close()
             }
         }
-
+    }
+    
+    inner class BookAdapter(private val books: List<BookSearchManager.BookResult>) : RecyclerView.Adapter<BookAdapter.BookViewHolder>() {
+        inner class BookViewHolder(v: View) : RecyclerView.ViewHolder(v) {
+            val img: ImageView = v.findViewById(R.id.imgBookCover)
+            val title: TextView = v.findViewById(R.id.tvBookTitle)
+            val author: TextView = v.findViewById(R.id.tvBookAuthor)
+            val source: TextView = v.findViewById(R.id.tvBookDescription)
+            val action: Button = v.findViewById(R.id.btnBookAction)
+        }
+        override fun onCreateViewHolder(p: ViewGroup, t: Int) = BookViewHolder(LayoutInflater.from(p.context).inflate(R.layout.item_book_search, p, false))
+        override fun onBindViewHolder(h: BookViewHolder, p: Int) {
+            val b = books[p]
+            h.title.text = b.title
+            h.author.text = b.authors
+            h.source.text = "Disponibile ora"
+            h.source.setTextColor(Color.parseColor("#4CAF50"))
+            h.img.load(b.thumbnailUrl) { 
+                crossfade(true)
+                placeholder(R.drawable.leggo)
+                error(R.drawable.leggo) 
+            }
+            h.action.setOnClickListener {
+                BookDetailsDialog.show(this@SearchBooksActivity, b) {
+                    b.downloadUrl?.let { url ->
+                        lifecycleScope.launch {
+                            Toast.makeText(this@SearchBooksActivity, "Preparazione download...", Toast.LENGTH_SHORT).show()
+                            startDirectDownload(url, b.title, b.format)
+                        }
+                    }
+                }
+            }
+        }
         override fun getItemCount() = books.size
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(onDownloadComplete) } catch (e: Exception) {}
     }
 }

@@ -1,0 +1,27 @@
+CREATE TABLE BookEntity (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    uriString TEXT NOT NULL,
+    coverPath TEXT,
+    lastOpened INTEGER NOT NULL DEFAULT 0,
+    isTrash INTEGER NOT NULL DEFAULT 0
+);
+
+selectAll:
+SELECT * FROM BookEntity WHERE isTrash = 0 ORDER BY lastOpened DESC;
+
+selectTrash:
+SELECT * FROM BookEntity WHERE isTrash = 1 ORDER BY lastOpened DESC;
+
+insertBook:
+INSERT OR REPLACE INTO BookEntity(id, title, uriString, coverPath, lastOpened, isTrash)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateTitle:
+UPDATE BookEntity SET title = ? WHERE id = ?;
+
+updateTrashStatus:
+UPDATE BookEntity SET isTrash = ? WHERE id = ?;
+
+deleteBook:
+DELETE FROM BookEntity WHERE id = ?;
