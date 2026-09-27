@@ -27,4 +27,4 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Android Debug APK & Shared Framework
-      run: ./gradlew assembleDebug :shared:assembleSharedXCFramework
+      run: ./gradlew assembleDebug :shared:assembleSharedDebugXCFramework
