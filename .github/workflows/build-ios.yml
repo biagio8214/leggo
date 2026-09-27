@@ -28,3 +28,9 @@ jobs:
 
     - name: Build Android Debug APK & Shared Framework
       run: ./gradlew assembleDebug :shared:assembleSharedDebugXCFramework
+
+    - name: Upload XCFramework Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: shared-xcframework
+        path: shared/build/XCFrameworks/debug/
