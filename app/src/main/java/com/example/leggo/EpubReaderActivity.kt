@@ -57,6 +57,7 @@ class EpubReaderActivity : BaseActivity() {
     private lateinit var gestureDetector: GestureDetector
 
     private var textPages: List<String> = emptyList()
+    private var htmlPages: List<String> = emptyList()
     private var chaptersList: List<Chapter> = emptyList()
     private var bookId: String = ""
 
@@ -470,7 +471,6 @@ class EpubReaderActivity : BaseActivity() {
                 }
             }
 
-            // 1. Trova il file OPF tramite container.xml o ricerca
             var opfPath = "content.opf"
             val containerBytes = entries["META-INF/container.xml"] ?: entries["meta-inf/container.xml"]
             if (containerBytes != null) {
@@ -483,7 +483,8 @@ class EpubReaderActivity : BaseActivity() {
             val opfBytes = entries[opfPath]
             val opfDir = opfPath.substringBeforeLast("/", "")
 
-            val pages = mutableListOf<String>()
+            val textPagesList = mutableListOf<String>()
+            val htmlPagesList = mutableListOf<String>()
             val chapters = mutableListOf<Chapter>()
             var coverBytes: ByteArray? = null
 
@@ -506,8 +507,6 @@ class EpubReaderActivity : BaseActivity() {
 
             if (opfBytes != null) {
                 val opfDoc = Jsoup.parse(String(opfBytes, Charsets.UTF_8))
-                
-                // Copertina ufficiale da OPF (meta name="cover" o properties="cover-image")
                 var coverItemId = opfDoc.select("meta[name=cover]").attr("content")
                 if (coverItemId.isBlank()) {
                     coverItemId = opfDoc.select("item[properties~=cover-image]").attr("id")
@@ -524,14 +523,12 @@ class EpubReaderActivity : BaseActivity() {
                     }
                 }
 
-                // Spine (ordine di lettura ufficiale dell'autore)
                 opfDoc.select("spine > itemref").forEach { itemref ->
                     val idref = itemref.attr("idref")
                     manifestItems[idref]?.let { href -> spineHrefs.add(href) }
                 }
             }
 
-            // Fallback copertina se non trovata via OPF
             if (coverBytes == null) {
                 val coverEntry = entries.entries.find { (k, _) ->
                     val l = k.lowercase()
@@ -562,7 +559,6 @@ class EpubReaderActivity : BaseActivity() {
                 
                 doc.select("script, style, head, meta").remove()
 
-                // Risolvi i link delle immagini con i file locali estratti
                 doc.select("img").forEach { img ->
                     val src = img.attr("src")
                     val resolvedPath = if (opfDir.isNotEmpty() && !src.startsWith("http")) {
@@ -576,18 +572,33 @@ class EpubReaderActivity : BaseActivity() {
                     }
                 }
 
-                val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${pages.size + 1}"
-                val bodyHtml = doc.body().html()
-                
-                if (bodyHtml.isNotBlank()) {
-                    chapters.add(Chapter(title, pages.size))
-                    pages.add(bodyHtml)
+                val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${chapters.size + 1}"
+                val plainText = doc.text().trim()
+                val bodyHtml = doc.body().html().trim()
+
+                if (plainText.isNotBlank()) {
+                    chapters.add(Chapter(title, textPagesList.size))
+                    
+                    val chunkSize = 2500
+                    if (plainText.length <= chunkSize) {
+                        textPagesList.add(plainText)
+                        htmlPagesList.add(bodyHtml)
+                    } else {
+                        var start = 0
+                        while (start < plainText.length) {
+                            val end = (start + chunkSize).coerceAtMost(plainText.length)
+                            textPagesList.add(plainText.substring(start, end))
+                            htmlPagesList.add(bodyHtml)
+                            start = end
+                        }
+                    }
                 }
             }
 
             withContext(Dispatchers.Main) {
-                if (pages.isNotEmpty()) {
-                    textPages = pages
+                if (textPagesList.isNotEmpty()) {
+                    textPages = textPagesList
+                    htmlPages = htmlPagesList
                     chaptersList = chapters
                     viewPager.adapter = PagerAdapter()
                     setupToc()
@@ -643,7 +654,7 @@ class EpubReaderActivity : BaseActivity() {
             h.tv.movementMethod = LinkMovementMethod.getInstance()
             h.tv.visibility = View.VISIBLE
 
-            val htmlContent = if (isTranslationEnabled) translatedPages[p] ?: textPages[p] else textPages[p]
+            val htmlContent = if (isTranslationEnabled) translatedPages[p] ?: htmlPages.getOrNull(p) ?: textPages[p] else htmlPages.getOrNull(p) ?: textPages[p]
             
             val imageGetter = Html.ImageGetter { source ->
                 try {
@@ -674,7 +685,7 @@ class EpubReaderActivity : BaseActivity() {
                 TranslationHelper.translate(originalText, null, "it", { translated ->
                     translatedPages[p] = translated
                     if (h.adapterPosition == p) {
-                        h.tv.text = Html.fromHtml(translated, Html.FROM_HTML_MODE_LEGACY, imageGetter, null)
+                        h.tv.text = android.text.Html.fromHtml(translated, Html.FROM_HTML_MODE_LEGACY, imageGetter, null)
                     }
                 }, {
                     h.tv.text = "Errore traduzione. Riprova.\n\n${textPages[p]}"
