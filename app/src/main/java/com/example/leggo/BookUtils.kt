@@ -145,4 +145,22 @@ object BookUtils {
             false
         }
     }
+
+    suspend fun updateBookCover(context: Context, uri: Uri, coverPath: String) {
+        try {
+            ensureInitialized(context)
+            val recent = BookManager.getRecentBooks()
+            val existing = recent.find { it.uriString == uri.toString() }
+            if (existing != null) {
+                val updated = existing.copy(coverPath = coverPath)
+                BookManager.saveBook(updated)
+            } else {
+                val title = FileUtils.getFileName(context, uri) ?: "Libro"
+                val book = Book(title, uri.toString(), coverPath, System.currentTimeMillis(), false)
+                BookManager.saveBook(book)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Errore aggiornamento copertina: ${e.message}", e)
+        }
+    }
 }

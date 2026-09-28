@@ -504,7 +504,9 @@ class EpubReaderActivity : BaseActivity() {
             if (coverBytes != null) {
                 val coversDir = File(filesDir, "covers")
                 if (!coversDir.exists()) coversDir.mkdirs()
-                FileOutputStream(File(coversDir, "$bookId.jpg")).use { it.write(coverBytes) }
+                val coverFile = File(coversDir, "$bookId.jpg")
+                FileOutputStream(coverFile).use { it.write(coverBytes) }
+                BookUtils.updateBookCover(this@EpubReaderActivity, uri, coverFile.absolutePath)
             }
 
             withContext(Dispatchers.Main) {

@@ -344,6 +344,31 @@ class PdfReaderActivity : BaseActivity() {
                     return@launch
                 }
                 document = doc
+                
+                // Genera la copertina del PDF dalla prima pagina
+                try {
+                    val page = doc.loadPage(0)
+                    val bitmap = Bitmap.createBitmap(300, 450, Bitmap.Config.ARGB_8888)
+                    bitmap.eraseColor(Color.WHITE)
+                    val bbox = page.bounds
+                    val scaleX = 300f / (bbox.x1 - bbox.x0)
+                    val scaleY = 450f / (bbox.y1 - bbox.y0)
+                    val scale = minOf(scaleX, scaleY)
+                    val matrix = Matrix(scale, 0f, 0f, scale, -bbox.x0 * scale, -bbox.y0 * scale)
+                    val dev = AndroidDrawDevice(bitmap, 0, 0, 0, 0, bitmap.width, bitmap.height)
+                    page.run(dev, matrix, null)
+                    
+                    val coversDir = File(filesDir, "covers")
+                    if (!coversDir.exists()) coversDir.mkdirs()
+                    val coverFile = File(coversDir, "$bookId.jpg")
+                    FileOutputStream(coverFile).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                    }
+                    BookUtils.updateBookCover(this@PdfReaderActivity, uri, coverFile.absolutePath)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 withContext(Dispatchers.Main) { setupPdfViewPager() }
             } catch (e: Exception) {
                 Log.e("PdfReaderActivity", "Errore apertura PDF: ${e.message}", e)
