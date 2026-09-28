@@ -5,12 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.text.Html
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.TextPaint
@@ -455,58 +457,132 @@ class EpubReaderActivity : BaseActivity() {
                 FileOutputStream(tempFile).use { output -> input.copyTo(output) }
             }
 
-            val htmlEntries = mutableMapOf<String, ByteArray>()
-            var coverBytes: ByteArray? = null
-            var isCoverFound = false
-
+            val entries = mutableMapOf<String, ByteArray>()
             ZipInputStream(tempFile.inputStream()).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
-                    val name = entry.name.lowercase()
-                    if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || 
-                        name.endsWith(".gif") || name.endsWith(".bmp") || name.endsWith(".webp")) {
-                        
-                        if (!isCoverFound) {
-                            val isNameMatch = name.contains("cover") || name.contains("jacket")
-                            if (isNameMatch || coverBytes == null) {
-                                val bos = ByteArrayOutputStream()
-                                zis.copyTo(bos)
-                                coverBytes = bos.toByteArray()
-                                if (isNameMatch) isCoverFound = true
-                            }
-                        }
-                    } else if (name.endsWith(".html") || name.endsWith(".xhtml") || name.endsWith(".htm")) {
+                    if (!entry.isDirectory) {
                         val bos = ByteArrayOutputStream()
                         zis.copyTo(bos)
-                        htmlEntries[entry.name] = bos.toByteArray()
+                        entries[entry.name.replace("\\", "/")] = bos.toByteArray()
                     }
                     entry = zis.nextEntry
                 }
             }
 
+            // 1. Trova il file OPF tramite container.xml o ricerca
+            var opfPath = "content.opf"
+            val containerBytes = entries["META-INF/container.xml"] ?: entries["meta-inf/container.xml"]
+            if (containerBytes != null) {
+                val containerDoc = Jsoup.parse(String(containerBytes, Charsets.UTF_8))
+                containerDoc.select("rootfile").first()?.attr("full-path")?.let { opfPath = it }
+            } else {
+                entries.keys.find { it.endsWith(".opf", true) }?.let { opfPath = it }
+            }
+
+            val opfBytes = entries[opfPath]
+            val opfDir = opfPath.substringBeforeLast("/", "")
+
             val pages = mutableListOf<String>()
             val chapters = mutableListOf<Chapter>()
+            var coverBytes: ByteArray? = null
 
-            // Ordinamento alfabetico/naturale dei file HTML/XHTML per garantire il corretto ordine dei capitoli
-            val sortedHtmlEntries = htmlEntries.entries.sortedBy { it.key.lowercase() }
+            val imagesDir = File(cacheDir, "epub_images/$bookId")
+            if (!imagesDir.exists()) imagesDir.mkdirs()
 
-            for ((_, bytes) in sortedHtmlEntries) {
-                val doc = Jsoup.parse(String(bytes, Charsets.UTF_8))
-                doc.select("script, style, head, link, meta").remove()
-                val text = doc.text()
-                if (text.isNotBlank()) {
-                    val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${pages.size + 1}"
-                    chapters.add(Chapter(title, pages.size))
-                    pages.add(text.trim())
+            val imageMap = mutableMapOf<String, String>()
+            entries.forEach { (path, bytes) ->
+                val lower = path.lowercase()
+                if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif")) {
+                    val imgFile = File(imagesDir, path.substringAfterLast("/"))
+                    FileOutputStream(imgFile).use { it.write(bytes) }
+                    imageMap[path] = imgFile.absolutePath
+                    imageMap[path.substringAfterLast("/")] = imgFile.absolutePath
                 }
             }
-            
+
+            val spineHrefs = mutableListOf<String>()
+            val manifestItems = mutableMapOf<String, String>()
+
+            if (opfBytes != null) {
+                val opfDoc = Jsoup.parse(String(opfBytes, Charsets.UTF_8))
+                
+                // Copertina ufficiale da OPF (meta name="cover" o properties="cover-image")
+                var coverItemId = opfDoc.select("meta[name=cover]").attr("content")
+                if (coverItemId.isBlank()) {
+                    coverItemId = opfDoc.select("item[properties~=cover-image]").attr("id")
+                }
+
+                opfDoc.select("manifest > item").forEach { item ->
+                    val id = item.attr("id")
+                    val href = item.attr("href")
+                    val fullHref = if (opfDir.isNotEmpty()) "$opfDir/$href" else href
+                    manifestItems[id] = fullHref
+
+                    if (id == coverItemId || item.attr("properties").contains("cover-image")) {
+                        coverBytes = entries[fullHref] ?: entries[href]
+                    }
+                }
+
+                // Spine (ordine di lettura ufficiale dell'autore)
+                opfDoc.select("spine > itemref").forEach { itemref ->
+                    val idref = itemref.attr("idref")
+                    manifestItems[idref]?.let { href -> spineHrefs.add(href) }
+                }
+            }
+
+            // Fallback copertina se non trovata via OPF
+            if (coverBytes == null) {
+                val coverEntry = entries.entries.find { (k, _) ->
+                    val l = k.lowercase()
+                    (l.contains("cover") || l.contains("jacket") || l.contains("titlepage")) && 
+                    (l.endsWith(".jpg") || l.endsWith(".jpeg") || l.endsWith(".png"))
+                }
+                coverBytes = coverEntry?.value
+            }
+
             if (coverBytes != null) {
                 val coversDir = File(filesDir, "covers")
                 if (!coversDir.exists()) coversDir.mkdirs()
                 val coverFile = File(coversDir, "$bookId.jpg")
                 FileOutputStream(coverFile).use { it.write(coverBytes) }
                 BookUtils.updateBookCover(this@EpubReaderActivity, uri, coverFile.absolutePath)
+            }
+
+            val chapterFiles = if (spineHrefs.isNotEmpty()) {
+                spineHrefs
+            } else {
+                entries.keys.filter { it.endsWith(".html", true) || it.endsWith(".xhtml", true) || it.endsWith(".htm", true) }.sorted()
+            }
+
+            for (href in chapterFiles) {
+                val bytes = entries[href] ?: entries[href.substringAfterLast("/")] ?: continue
+                val htmlStr = String(bytes, Charsets.UTF_8)
+                val doc = Jsoup.parse(htmlStr)
+                
+                doc.select("script, style, head, meta").remove()
+
+                // Risolvi i link delle immagini con i file locali estratti
+                doc.select("img").forEach { img ->
+                    val src = img.attr("src")
+                    val resolvedPath = if (opfDir.isNotEmpty() && !src.startsWith("http")) {
+                        "$opfDir/$src"
+                    } else {
+                        src
+                    }
+                    val localPath = imageMap[resolvedPath] ?: imageMap[src.substringAfterLast("/")]
+                    if (localPath != null) {
+                        img.attr("src", "file://$localPath")
+                    }
+                }
+
+                val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${pages.size + 1}"
+                val bodyHtml = doc.body().html()
+                
+                if (bodyHtml.isNotBlank()) {
+                    chapters.add(Chapter(title, pages.size))
+                    pages.add(bodyHtml)
+                }
             }
 
             withContext(Dispatchers.Main) {
@@ -567,8 +643,30 @@ class EpubReaderActivity : BaseActivity() {
             h.tv.movementMethod = LinkMovementMethod.getInstance()
             h.tv.visibility = View.VISIBLE
 
-            val text = if (isTranslationEnabled) translatedPages[p] ?: textPages[p] else textPages[p]
-            h.tv.text = getSpannableText(text, p)
+            val htmlContent = if (isTranslationEnabled) translatedPages[p] ?: textPages[p] else textPages[p]
+            
+            val imageGetter = Html.ImageGetter { source ->
+                try {
+                    val cleanSource = source.removePrefix("file://")
+                    val file = File(cleanSource)
+                    if (file.exists()) {
+                        val d = Drawable.createFromPath(file.absolutePath)
+                        d?.let {
+                            val maxWidth = h.tv.width.takeIf { w -> w > 0 } ?: 800
+                            val scale = if (it.intrinsicWidth > maxWidth) maxWidth.toFloat() / it.intrinsicWidth else 1f
+                            val w = (it.intrinsicWidth * scale).toInt()
+                            val hVal = (it.intrinsicHeight * scale).toInt()
+                            it.setBounds(0, 0, w, hVal)
+                            return@ImageGetter it
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                null
+            }
+
+            h.tv.text = Html.fromHtml(htmlContent, Html.FROM_HTML_MODE_LEGACY, imageGetter, null)
 
             if (isTranslationEnabled && translatedPages[p] == null) {
                 h.tv.text = "Traduzione in corso..."
@@ -576,7 +674,7 @@ class EpubReaderActivity : BaseActivity() {
                 TranslationHelper.translate(originalText, null, "it", { translated ->
                     translatedPages[p] = translated
                     if (h.adapterPosition == p) {
-                        h.tv.text = getSpannableText(translated, p)
+                        h.tv.text = Html.fromHtml(translated, Html.FROM_HTML_MODE_LEGACY, imageGetter, null)
                     }
                 }, {
                     h.tv.text = "Errore traduzione. Riprova.\n\n${textPages[p]}"
