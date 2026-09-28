@@ -455,8 +455,7 @@ class EpubReaderActivity : BaseActivity() {
                 FileOutputStream(tempFile).use { output -> input.copyTo(output) }
             }
 
-            val pages = mutableListOf<String>()
-            val chapters = mutableListOf<Chapter>()
+            val htmlEntries = mutableMapOf<String, ByteArray>()
             var coverBytes: ByteArray? = null
             var isCoverFound = false
 
@@ -479,16 +478,26 @@ class EpubReaderActivity : BaseActivity() {
                     } else if (name.endsWith(".html") || name.endsWith(".xhtml") || name.endsWith(".htm")) {
                         val bos = ByteArrayOutputStream()
                         zis.copyTo(bos)
-                        val doc = Jsoup.parse(bos.toString("UTF-8"))
-                        doc.select("script, style, head, link, meta").remove()
-                        val text = doc.text()
-                        if (text.isNotBlank()) {
-                            val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${pages.size + 1}"
-                            chapters.add(Chapter(title, pages.size))
-                            pages.add(text.trim())
-                        }
+                        htmlEntries[entry.name] = bos.toByteArray()
                     }
                     entry = zis.nextEntry
+                }
+            }
+
+            val pages = mutableListOf<String>()
+            val chapters = mutableListOf<Chapter>()
+
+            // Ordinamento alfabetico/naturale dei file HTML/XHTML per garantire il corretto ordine dei capitoli
+            val sortedHtmlEntries = htmlEntries.entries.sortedBy { it.key.lowercase() }
+
+            for ((_, bytes) in sortedHtmlEntries) {
+                val doc = Jsoup.parse(String(bytes, Charsets.UTF_8))
+                doc.select("script, style, head, link, meta").remove()
+                val text = doc.text()
+                if (text.isNotBlank()) {
+                    val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${pages.size + 1}"
+                    chapters.add(Chapter(title, pages.size))
+                    pages.add(text.trim())
                 }
             }
             

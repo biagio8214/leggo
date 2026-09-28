@@ -1,9 +1,16 @@
 package com.example.leggo
 
+import android.R
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -18,6 +25,7 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
     private var isReading = false
     private var speed = 1.0f
     private var language = Locale.ITALIAN
+    private var wakeLock: PowerManager.WakeLock? = null
 
     interface ReadingCallback {
         fun onBlockSpoken(startIndex: Int)
@@ -33,6 +41,56 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
     override fun onCreate() {
         super.onCreate()
         tts = TextToSpeech(this, this)
+        startForegroundNotification()
+    }
+
+    private fun startForegroundNotification() {
+        val channelId = "leggo_reading_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Lettura in corso", NotificationManager.IMPORTANCE_LOW)
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+                .setContentTitle("Leggo - Lettura in corso")
+                .setContentText("Lettura audiolibro attiva in background")
+                .setSmallIcon(R.drawable.ic_media_play)
+                .build()
+        } else {
+            Notification.Builder(this)
+                .setContentTitle("Leggo - Lettura in corso")
+                .setContentText("Lettura audiolibro attiva in background")
+                .setSmallIcon(R.drawable.ic_media_play)
+                .build()
+        }
+        startForeground(1, notification)
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Leggo::ReadingServiceWakeLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wakeLock?.isHeld == false) {
+                wakeLock?.acquire(15 * 60 * 1000L) // 15 minutes timeout safety
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onInit(status: Int) {
@@ -47,6 +105,7 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
                             speakNext()
                         } else {
                             isReading = false
+                            releaseWakeLock()
                             callback?.onReadingFinished()
                         }
                     }
@@ -73,6 +132,7 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
     fun startReading() {
         if (sentences.isNotEmpty() && currentIndex < sentences.size) {
             isReading = true
+            acquireWakeLock()
             speakNext()
         }
     }
@@ -87,6 +147,7 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
 
     fun stopReading() {
         isReading = false
+        releaseWakeLock()
         if (tts != null) {
             tts!!.stop()
         }
@@ -134,6 +195,7 @@ class ReadingService : Service(), TextToSpeech.OnInitListener {
     fun getCurrentSentenceIndex() = currentIndex
 
     override fun onDestroy() {
+        releaseWakeLock()
         tts?.shutdown()
         super.onDestroy()
     }
