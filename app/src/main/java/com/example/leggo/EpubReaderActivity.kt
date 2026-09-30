@@ -573,6 +573,12 @@ class EpubReaderActivity : BaseActivity() {
                 }
 
                 val title = doc.select("h1, h2, h3").firstOrNull()?.text() ?: "Capitolo ${chapters.size + 1}"
+                
+                doc.select("h1").attr("style", "font-size: 1.5em; font-weight: bold; display: block; margin-top: 1em; margin-bottom: 0.5em;")
+                doc.select("h2").attr("style", "font-size: 1.3em; font-weight: bold; display: block; margin-top: 0.8em; margin-bottom: 0.4em;")
+                doc.select("h3").attr("style", "font-size: 1.1em; font-weight: bold; display: block; margin-top: 0.6em; margin-bottom: 0.3em;")
+                doc.select("p").attr("style", "display: block; margin-bottom: 1em;")
+
                 val plainText = doc.text().trim()
                 val bodyHtml = doc.body().html().trim()
 
